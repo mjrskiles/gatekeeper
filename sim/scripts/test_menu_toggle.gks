@@ -37,18 +37,13 @@
 # and mode handler stops running in menu, so it stays at whatever state it was
 50      log     Button B released
 
-# === Test 3: Exit menu with same gesture ===
-100     log     Test 3: Exiting menu with A hold + B hold gesture
+# === Test 3: Exit menu with A hold (solo) gesture ===
+100     log     Test 3: Exiting menu with A hold gesture
 
-# Press A first
+# Hold A for 500ms to exit menu
 0       press   a
-100     press   b
-# Wait for B to reach hold threshold
-550     log     Should have exited menu
-
-# Release buttons
-50      release a
-50      release b
+550     release a
+50      log     Should have exited menu
 
 # === Test 4: Verify back in perform mode (gate mode active) ===
 100     log     Test 4: Verifying gate mode is active again

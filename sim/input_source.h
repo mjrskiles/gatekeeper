@@ -35,9 +35,10 @@ struct InputSource {
 
     /**
      * Check if simulation should run in real-time.
-     * Scripts run fast, keyboard runs real-time.
+     * Keyboard input runs real-time (1ms tick with usleep).
+     * Scripts run as fast as possible (no pacing delay).
      *
-     * @return true for real-time pacing, false for fast-forward
+     * @return true for real-time pacing, false for no pacing
      */
     bool (*is_realtime)(InputSource *self);
 

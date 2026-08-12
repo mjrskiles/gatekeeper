@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /**
  * @file sim_hal.c
@@ -29,6 +30,13 @@ static uint8_t led_b[SIM_NUM_LEDS] = {0};
 
 // CV input voltage (0-255 ADC value, maps to 0-5V)
 static uint8_t sim_cv_voltage = 0;
+
+// ADC fault injection state (FDP-016)
+static SimAdcMode adc_fault_mode = SIM_ADC_NORMAL;
+static uint8_t adc_noise_amplitude = 10;  // Default +/- 10 ADC units
+
+// EEPROM fault injection state (FDP-016 Phase 3)
+static SimEepromMode eeprom_fault_mode = SIM_EEPROM_NORMAL;
 
 // Watchdog simulation
 #define SIM_WDT_TIMEOUT_MS 250
@@ -151,32 +159,82 @@ void sim_reset_time(void) {
 
 static uint8_t sim_eeprom_read_byte(uint16_t addr) {
     if (addr >= SIM_EEPROM_SIZE) return 0xFF;
-    return sim_eeprom[addr];
+
+    // Apply fault injection (FDP-016 Phase 3)
+    switch (eeprom_fault_mode) {
+        case SIM_EEPROM_READ_FF:
+            return 0xFF;
+
+        case SIM_EEPROM_CORRUPT: {
+            // Randomly flip one bit in the returned value
+            uint8_t value = sim_eeprom[addr];
+            uint8_t bit = rand() % 8;
+            return value ^ (1 << bit);
+        }
+
+        case SIM_EEPROM_WRITE_FAIL:
+        case SIM_EEPROM_NORMAL:
+        default:
+            return sim_eeprom[addr];
+    }
 }
 
 static void sim_eeprom_write_byte(uint16_t addr, uint8_t value) {
     if (addr >= SIM_EEPROM_SIZE) return;
+
+    // Apply fault injection (FDP-016 Phase 3)
+    if (eeprom_fault_mode == SIM_EEPROM_WRITE_FAIL) {
+        return;  // Silently fail
+    }
+
     sim_eeprom[addr] = value;
 }
 
 static uint16_t sim_eeprom_read_word(uint16_t addr) {
-    if (addr + 1 >= SIM_EEPROM_SIZE) return 0xFFFF;
-    return sim_eeprom[addr] | ((uint16_t)sim_eeprom[addr + 1] << 8);
+    // Use byte-level functions to get fault injection
+    uint8_t lo = sim_eeprom_read_byte(addr);
+    uint8_t hi = sim_eeprom_read_byte(addr + 1);
+    return lo | ((uint16_t)hi << 8);
 }
 
 static void sim_eeprom_write_word(uint16_t addr, uint16_t value) {
-    if (addr + 1 >= SIM_EEPROM_SIZE) return;
-    sim_eeprom[addr] = value & 0xFF;
-    sim_eeprom[addr + 1] = (value >> 8) & 0xFF;
+    // Use byte-level functions to get fault injection
+    sim_eeprom_write_byte(addr, value & 0xFF);
+    sim_eeprom_write_byte(addr + 1, (value >> 8) & 0xFF);
 }
 
 static uint8_t sim_adc_read(uint8_t channel) {
     // In simulator, channel 3 (CV input) returns the simulated CV voltage
     // Other channels return 0
-    if (channel == 3) {
-        return sim_cv_voltage;
+    if (channel != 3) {
+        return 0;
     }
-    return 0;
+
+    // Apply fault injection (FDP-016)
+    switch (adc_fault_mode) {
+        case SIM_ADC_TIMEOUT:
+            // Match hardware timeout behavior: returns 128 (mid-scale)
+            return 128;
+
+        case SIM_ADC_STUCK_LOW:
+            return 0;
+
+        case SIM_ADC_STUCK_HIGH:
+            return 255;
+
+        case SIM_ADC_NOISY: {
+            // Add random noise to the actual value
+            int16_t noisy = (int16_t)sim_cv_voltage +
+                ((rand() % (2 * adc_noise_amplitude + 1)) - adc_noise_amplitude);
+            if (noisy < 0) noisy = 0;
+            if (noisy > 255) noisy = 255;
+            return (uint8_t)noisy;
+        }
+
+        case SIM_ADC_NORMAL:
+        default:
+            return sim_cv_voltage;
+    }
 }
 
 // Watchdog simulation - checks if timeout exceeded
@@ -286,4 +344,28 @@ bool sim_wdt_has_fired(void) {
 
 void sim_wdt_clear_fired(void) {
     wdt_fired = false;
+}
+
+// =============================================================================
+// Fault Injection API (FDP-016)
+// =============================================================================
+
+void sim_adc_set_mode(SimAdcMode mode) {
+    adc_fault_mode = mode;
+}
+
+void sim_adc_set_noise_amplitude(uint8_t amplitude) {
+    adc_noise_amplitude = amplitude;
+}
+
+SimAdcMode sim_adc_get_mode(void) {
+    return adc_fault_mode;
+}
+
+void sim_eeprom_set_mode(SimEepromMode mode) {
+    eeprom_fault_mode = mode;
+}
+
+SimEepromMode sim_eeprom_get_mode(void) {
+    return eeprom_fault_mode;
 }

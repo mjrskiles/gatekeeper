@@ -17,17 +17,33 @@ static const NeopixelColor mode_colors[] = {
     {LED_COLOR_CYCLE_R,   LED_COLOR_CYCLE_G,   LED_COLOR_CYCLE_B},    // MODE_CYCLE - Yellow
 };
 
-// Page colors (indexed by MenuPage)
-// Group by mode association for visual consistency
-static const NeopixelColor page_colors[] = {
-    {  0, 255,   0},    // PAGE_GATE_CV - Green (gate)
-    {  0, 128, 255},    // PAGE_TRIGGER_BEHAVIOR - Cyan (trigger)
-    {  0,  64, 192},    // PAGE_TRIGGER_PULSE_LEN - Darker cyan
-    {255,  64,   0},    // PAGE_TOGGLE_BEHAVIOR - Orange (toggle)
-    {255,   0, 255},    // PAGE_DIVIDE_DIVISOR - Magenta (divide)
-    {255, 255,   0},    // PAGE_CYCLE_PATTERN - Yellow (cycle)
-    {255, 255, 255},    // PAGE_CV_GLOBAL - White (global)
-    {128, 128, 128},    // PAGE_MENU_TIMEOUT - Gray (global)
+// Global settings color (white)
+static const NeopixelColor global_color = {255, 255, 255};
+
+// Page to mode mapping (which mode's color to use for each page)
+// Special value MODE_COUNT means "global" (use global_color)
+static const uint8_t page_mode_map[] = {
+    MODE_GATE,      // PAGE_GATE_CV
+    MODE_TRIGGER,   // PAGE_TRIGGER_BEHAVIOR
+    MODE_TRIGGER,   // PAGE_TRIGGER_PULSE_LEN
+    MODE_TOGGLE,    // PAGE_TOGGLE_BEHAVIOR
+    MODE_DIVIDE,    // PAGE_DIVIDE_DIVISOR
+    MODE_CYCLE,     // PAGE_CYCLE_PATTERN
+    MODE_COUNT,     // PAGE_CV_GLOBAL (global)
+    MODE_COUNT,     // PAGE_MENU_TIMEOUT (global)
+};
+
+// Page animation type: 0 = blink (first page), 1 = glow (second page)
+// Blink is default to clearly differentiate from solid perform mode
+static const uint8_t page_anim_type[] = {
+    0,  // PAGE_GATE_CV - first gate page (blink)
+    0,  // PAGE_TRIGGER_BEHAVIOR - first trigger page (blink)
+    1,  // PAGE_TRIGGER_PULSE_LEN - second trigger page (glow)
+    0,  // PAGE_TOGGLE_BEHAVIOR - first toggle page (blink)
+    0,  // PAGE_DIVIDE_DIVISOR - first divide page (blink)
+    0,  // PAGE_CYCLE_PATTERN - first cycle page (blink)
+    0,  // PAGE_CV_GLOBAL - first global page (blink)
+    1,  // PAGE_MENU_TIMEOUT - second global page (glow)
 };
 
 void led_feedback_init(LEDFeedbackController *ctrl) {
@@ -41,6 +57,7 @@ void led_feedback_init(LEDFeedbackController *ctrl) {
     ctrl->in_menu = false;
     ctrl->current_mode = 0;
     ctrl->current_page = 0;
+    ctrl->last_setting_value = 0xFF;  // Invalid value to force initial set
 
     // Set initial mode color
     led_feedback_set_mode(ctrl, 0);
@@ -98,18 +115,38 @@ void led_feedback_update(LEDFeedbackController *ctrl,
 
         led_animation_update(&ctrl->activity_anim, LED_ACTIVITY, current_time);
     } else {
-        // In menu mode: mode LED blinks, activity LED shows value
+        // In menu mode: LED X shows page, LED Y shows value
 
-        // Update mode LED blink animation
+        // Update mode LED animation (solid or blink based on page type)
         led_animation_update(&ctrl->mode_anim, LED_MODE, current_time);
 
-        // Activity LED shows setting value as brightness
-        // Brightness: 64 (25%) to 255 (100%) based on value position
-        if (feedback->setting_max > 0) {
-            uint8_t brightness = 64 + ((uint16_t)(feedback->setting_value + 1) * 191)
-                                     / feedback->setting_max;
-            NeopixelColor value_color = {brightness, brightness, brightness};
-            led_animation_set_static(&ctrl->activity_anim, value_color);
+        // LED Y shows setting value as behavior (per flowchart):
+        // 0: OFF, 1: ON, 2: BLINK, 3: GLOW
+        // Color matches page color for visual consistency
+        // Only update animation when value changes to avoid resetting animation state
+        if (feedback->setting_value != ctrl->last_setting_value) {
+            NeopixelColor page_color = led_feedback_get_page_color(ctrl->current_page);
+            ctrl->last_setting_value = feedback->setting_value;
+
+            switch (feedback->setting_value) {
+                case 0:
+                    // Value 0: LED Y OFF
+                    led_animation_set_static(&ctrl->activity_anim, (NeopixelColor){0, 0, 0});
+                    break;
+                case 1:
+                    // Value 1: LED Y ON (solid)
+                    led_animation_set_static(&ctrl->activity_anim, page_color);
+                    break;
+                case 2:
+                    // Value 2: LED Y BLINKING
+                    led_animation_set(&ctrl->activity_anim, ANIM_BLINK, page_color, ANIM_BLINK_PERIOD_MS);
+                    break;
+                case 3:
+                default:
+                    // Value 3+: LED Y GLOWING
+                    led_animation_set(&ctrl->activity_anim, ANIM_GLOW, page_color, ANIM_GLOW_PERIOD_MS);
+                    break;
+            }
         }
         led_animation_update(&ctrl->activity_anim, LED_ACTIVITY, current_time);
     }
@@ -136,10 +173,18 @@ void led_feedback_enter_menu(LEDFeedbackController *ctrl, uint8_t page) {
 
     ctrl->in_menu = true;
     ctrl->current_page = page;
+    ctrl->last_setting_value = 0xFF;  // Reset to force animation set on first update
 
-    // Blink the page color to indicate menu mode
+    // Set LED X: page color with animation based on page type
+    // 0 = blink (first page), 1 = glow (second page)
     NeopixelColor page_color = led_feedback_get_page_color(page);
-    led_animation_set(&ctrl->mode_anim, ANIM_BLINK, page_color, ANIM_BLINK_PERIOD_MS);
+    if (page < PAGE_COUNT && page_anim_type[page]) {
+        // Second page of group: glow
+        led_animation_set(&ctrl->mode_anim, ANIM_GLOW, page_color, ANIM_GLOW_PERIOD_MS);
+    } else {
+        // First page of group: blink
+        led_animation_set(&ctrl->mode_anim, ANIM_BLINK, page_color, ANIM_BLINK_PERIOD_MS);
+    }
 
     // Activity LED will show value feedback (set in update)
 }
@@ -159,10 +204,19 @@ void led_feedback_set_page(LEDFeedbackController *ctrl, uint8_t page) {
     if (page >= PAGE_COUNT) page = 0;
 
     ctrl->current_page = page;
+    ctrl->last_setting_value = 0xFF;  // Reset to force animation set on next update
 
     if (ctrl->in_menu) {
+        // Set LED X: page color with animation based on page type
+        // 0 = blink (first page), 1 = glow (second page)
         NeopixelColor page_color = led_feedback_get_page_color(page);
-        led_animation_set(&ctrl->mode_anim, ANIM_BLINK, page_color, ANIM_BLINK_PERIOD_MS);
+        if (page_anim_type[page]) {
+            // Second page of group: glow
+            led_animation_set(&ctrl->mode_anim, ANIM_GLOW, page_color, ANIM_GLOW_PERIOD_MS);
+        } else {
+            // First page of group: blink
+            led_animation_set(&ctrl->mode_anim, ANIM_BLINK, page_color, ANIM_BLINK_PERIOD_MS);
+        }
     }
 }
 
@@ -186,5 +240,9 @@ NeopixelColor led_feedback_get_page_color(uint8_t page) {
     if (page >= PAGE_COUNT) {
         return (NeopixelColor){128, 128, 128};  // Gray for unknown
     }
-    return page_colors[page];
+    uint8_t mode = page_mode_map[page];
+    if (mode >= MODE_COUNT) {
+        return global_color;  // Global pages use white
+    }
+    return mode_colors[mode];
 }

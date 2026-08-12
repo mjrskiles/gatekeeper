@@ -1,0 +1,137 @@
+# Test Trigger mode CV signal chain (FDP-016 Phase 2)
+#
+# Tests the complete signal path:
+#   CV rising edge → mode handler → trigger pulse → output
+#
+# Trigger mode: rising edge produces fixed-length pulse (default 10ms)
+#
+# Per ADR-004 hysteresis:
+# - High threshold: 128 (2.5V) - goes HIGH when CV > 128
+# - Low threshold:   77 (1.5V) - goes LOW when CV < 77
+
+# Wait for app init
+1000    log     Starting Trigger mode CV signal chain test
+
+# ============================================================
+# Phase 1: Switch to Trigger mode (hold A 500ms, release)
+# ============================================================
+0       log     Phase 1: Switching to Trigger mode
+0       cv      0
+0       press   a
+550     release a
+# Mode should now be TRIGGER (Gate -> Trigger is one cycle)
+50      log     Now in Trigger mode
+
+# ============================================================
+# Phase 2: Basic trigger operation
+# ============================================================
+100     log     Phase 2: Basic trigger operation
+0       cv      0
+50      assert  output low
+
+# Rising edge - should produce pulse
+0       cv      200
+# Output should go HIGH immediately
+10      assert  output high
+
+# Wait for pulse to complete (default 10ms, add margin)
+30      assert  output low
+
+# CV staying high should not retrigger
+100     assert  output low
+
+# ============================================================
+# Phase 3: Falling edge should not trigger (default: rising only)
+# ============================================================
+100     log     Phase 3: Falling edge (no trigger)
+
+# Return CV to 0 first to ensure clean state
+0       cv      0
+50      assert  output low
+
+# Rising edge to get output high
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# Now drop CV - should NOT trigger
+0       cv      0
+50      assert  output low
+100     assert  output low
+
+# ============================================================
+# Phase 4: Multiple triggers in sequence
+# ============================================================
+100     log     Phase 4: Multiple triggers
+
+# First trigger
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# Return low
+0       cv      0
+50      assert  output low
+
+# Second trigger
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# Return low
+0       cv      0
+50      assert  output low
+
+# Third trigger
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# ============================================================
+# Phase 5: Trigger at threshold boundary
+# ============================================================
+100     log     Phase 5: Threshold boundary trigger
+
+# Start low
+0       cv      0
+50      assert  output low
+
+# Just below threshold - no trigger
+0       cv      127
+50      assert  output low
+
+# At threshold - no trigger (need to go ABOVE 128)
+0       cv      128
+50      assert  output low
+
+# Just above threshold - should trigger
+0       cv      129
+10      assert  output high
+30      assert  output low
+
+# ============================================================
+# Phase 6: Rapid retriggering
+# ============================================================
+100     log     Phase 6: Rapid retriggering
+
+# Start with CV low to ensure clean state
+0       cv      0
+50      assert  output low
+
+# Trigger, wait for pulse, immediately retrigger
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# Quick return and retrigger
+0       cv      0
+50      assert  output low
+0       cv      200
+10      assert  output high
+30      assert  output low
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All Trigger mode CV chain tests passed!
+0       quit

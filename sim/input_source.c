@@ -188,14 +188,6 @@ static bool keyboard_update(InputSource *self, uint32_t current_time_ms) {
                 ctx->auto_release_b.release_time = 0;
                 break;
 
-            case 'f': case 'F':
-                // Toggle fast/realtime mode
-                if (ctx->sim_state) {
-                    ctx->sim_state->realtime_mode = !ctx->sim_state->realtime_mode;
-                    sim_state_mark_dirty(ctx->sim_state);
-                }
-                break;
-
             case 'l':
                 // Cycle LFO preset
                 cycle_lfo_preset();
@@ -278,7 +270,10 @@ typedef enum {
     ACT_RELEASE,
     ACT_ASSERT,
     ACT_QUIT,
-    ACT_LOG
+    ACT_LOG,
+    ACT_FAULT_ADC,
+    ACT_FAULT_EEPROM,
+    ACT_CV         // Set CV to specific value (0-255)
 } ScriptAction;
 
 typedef enum {
@@ -293,6 +288,9 @@ typedef struct {
     ScriptAction action;
     ScriptTarget target;
     bool value;             // For assert: expected value
+    uint8_t cv_value;       // For cv action: 0-255 ADC value
+    SimAdcMode adc_fault_mode;      // For ACT_FAULT_ADC
+    SimEepromMode eeprom_fault_mode; // For ACT_FAULT_EEPROM
     char message[128];      // For log action (generous size on x86)
 } ScriptEvent;
 
@@ -449,6 +447,62 @@ static bool parse_script(ScriptCtx *ctx, const char *filename) {
             snprintf(evt.message, sizeof(evt.message), "%s %s", arg1, arg2);
         } else if (strcmp(action_str, "quit") == 0 || strcmp(action_str, "exit") == 0) {
             evt.action = ACT_QUIT;
+        } else if (strcmp(action_str, "fault") == 0) {
+            // fault <subsystem> <mode>
+            // Parse mode from arg2 (already lowercase)
+            char mode_lower[64];
+            strncpy(mode_lower, arg2, sizeof(mode_lower) - 1);
+            mode_lower[sizeof(mode_lower) - 1] = '\0';
+            for (char *s = mode_lower; *s; s++) *s = tolower(*s);
+
+            if (strcmp(arg1, "adc") == 0) {
+                evt.action = ACT_FAULT_ADC;
+                if (strcmp(mode_lower, "normal") == 0) {
+                    evt.adc_fault_mode = SIM_ADC_NORMAL;
+                } else if (strcmp(mode_lower, "timeout") == 0) {
+                    evt.adc_fault_mode = SIM_ADC_TIMEOUT;
+                } else if (strcmp(mode_lower, "stuck_low") == 0) {
+                    evt.adc_fault_mode = SIM_ADC_STUCK_LOW;
+                } else if (strcmp(mode_lower, "stuck_high") == 0) {
+                    evt.adc_fault_mode = SIM_ADC_STUCK_HIGH;
+                } else if (strcmp(mode_lower, "noisy") == 0) {
+                    evt.adc_fault_mode = SIM_ADC_NOISY;
+                } else {
+                    fprintf(stderr, "Script error line %d: unknown ADC fault mode '%s'\n", line_num, arg2);
+                    fclose(f);
+                    return false;
+                }
+            } else if (strcmp(arg1, "eeprom") == 0) {
+                evt.action = ACT_FAULT_EEPROM;
+                if (strcmp(mode_lower, "normal") == 0) {
+                    evt.eeprom_fault_mode = SIM_EEPROM_NORMAL;
+                } else if (strcmp(mode_lower, "write_fail") == 0) {
+                    evt.eeprom_fault_mode = SIM_EEPROM_WRITE_FAIL;
+                } else if (strcmp(mode_lower, "read_ff") == 0) {
+                    evt.eeprom_fault_mode = SIM_EEPROM_READ_FF;
+                } else if (strcmp(mode_lower, "corrupt") == 0) {
+                    evt.eeprom_fault_mode = SIM_EEPROM_CORRUPT;
+                } else {
+                    fprintf(stderr, "Script error line %d: unknown EEPROM fault mode '%s'\n", line_num, arg2);
+                    fclose(f);
+                    return false;
+                }
+            } else {
+                fprintf(stderr, "Script error line %d: fault requires 'adc' or 'eeprom' subsystem (got '%s')\n", line_num, arg1);
+                fclose(f);
+                return false;
+            }
+        } else if (strcmp(action_str, "cv") == 0) {
+            // cv <value> - set CV to specific ADC value (0-255)
+            evt.action = ACT_CV;
+            char *endptr;
+            long val = strtol(arg1, &endptr, 10);
+            if (*endptr != '\0' || val < 0 || val > 255) {
+                fprintf(stderr, "Script error line %d: cv value must be 0-255 (got '%s')\n", line_num, arg1);
+                fclose(f);
+                return false;
+            }
+            evt.cv_value = (uint8_t)val;
         } else {
             fprintf(stderr, "Script error line %d: unknown action '%s'\n", line_num, action_str);
             fclose(f);
@@ -485,10 +539,12 @@ static bool script_update(InputSource *self, uint32_t current_time_ms) {
                         sim_set_button_b(true);
                         script_log(sim_get_time(), "Script: Button B pressed");
                         break;
-                    case TGT_CV:
-                        sim_set_cv_voltage(255);  // 5V = HIGH
+                    case TGT_CV: {
+                        CVSource *cv = sim_get_cv_source();
+                        if (cv) cv_source_set_manual(cv, 255);  // 5V = HIGH
                         script_log(sim_get_time(), "Script: CV high (5V)");
                         break;
+                    }
                     default:
                         break;
                 }
@@ -504,10 +560,12 @@ static bool script_update(InputSource *self, uint32_t current_time_ms) {
                         sim_set_button_b(false);
                         script_log(sim_get_time(), "Script: Button B released");
                         break;
-                    case TGT_CV:
-                        sim_set_cv_voltage(0);  // 0V = LOW
+                    case TGT_CV: {
+                        CVSource *cv = sim_get_cv_source();
+                        if (cv) cv_source_set_manual(cv, 0);  // 0V = LOW
                         script_log(sim_get_time(), "Script: CV low (0V)");
                         break;
+                    }
                     default:
                         break;
                 }
@@ -548,6 +606,44 @@ static bool script_update(InputSource *self, uint32_t current_time_ms) {
             case ACT_LOG:
                 script_log(sim_get_time(), "Script: %s", evt->message);
                 break;
+
+            case ACT_FAULT_ADC: {
+                const char *mode_name = "unknown";
+                switch (evt->adc_fault_mode) {
+                    case SIM_ADC_NORMAL: mode_name = "normal"; break;
+                    case SIM_ADC_TIMEOUT: mode_name = "timeout"; break;
+                    case SIM_ADC_STUCK_LOW: mode_name = "stuck_low"; break;
+                    case SIM_ADC_STUCK_HIGH: mode_name = "stuck_high"; break;
+                    case SIM_ADC_NOISY: mode_name = "noisy"; break;
+                }
+                sim_adc_set_mode(evt->adc_fault_mode);
+                script_log(sim_get_time(), "Script: ADC fault mode set to %s", mode_name);
+                break;
+            }
+
+            case ACT_FAULT_EEPROM: {
+                const char *mode_name = "unknown";
+                switch (evt->eeprom_fault_mode) {
+                    case SIM_EEPROM_NORMAL: mode_name = "normal"; break;
+                    case SIM_EEPROM_WRITE_FAIL: mode_name = "write_fail"; break;
+                    case SIM_EEPROM_READ_FF: mode_name = "read_ff"; break;
+                    case SIM_EEPROM_CORRUPT: mode_name = "corrupt"; break;
+                }
+                sim_eeprom_set_mode(evt->eeprom_fault_mode);
+                script_log(sim_get_time(), "Script: EEPROM fault mode set to %s", mode_name);
+                break;
+            }
+
+            case ACT_CV: {
+                // Use cv_source_set_manual so the value persists through cv_source_tick()
+                CVSource *cv = sim_get_cv_source();
+                if (cv) {
+                    cv_source_set_manual(cv, evt->cv_value);
+                }
+                script_log(sim_get_time(), "Script: CV set to %d (%.2fV)",
+                          evt->cv_value, evt->cv_value * 5.0 / 255.0);
+                break;
+            }
 
             case ACT_QUIT:
                 script_log(sim_get_time(), "Script: quit");

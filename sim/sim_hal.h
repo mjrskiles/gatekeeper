@@ -16,6 +16,61 @@
 // Number of simulated LEDs
 #define SIM_NUM_LEDS 2
 
+// =============================================================================
+// Fault Injection API (FDP-016)
+// =============================================================================
+
+/**
+ * ADC fault injection modes.
+ * See FDP-016 for design rationale.
+ */
+typedef enum {
+    SIM_ADC_NORMAL,      // Return actual CV value
+    SIM_ADC_TIMEOUT,     // Always return 128 (matches hardware timeout behavior)
+    SIM_ADC_STUCK_LOW,   // Always return 0
+    SIM_ADC_STUCK_HIGH,  // Always return 255
+    SIM_ADC_NOISY,       // Add random noise to readings
+} SimAdcMode;
+
+/**
+ * EEPROM fault injection modes.
+ * See FDP-016 Phase 3 for design rationale.
+ */
+typedef enum {
+    SIM_EEPROM_NORMAL,      // Normal operation
+    SIM_EEPROM_WRITE_FAIL,  // Writes silently fail (reads work)
+    SIM_EEPROM_READ_FF,     // All reads return 0xFF (erased state)
+    SIM_EEPROM_CORRUPT,     // Random bit flips on read
+} SimEepromMode;
+
+/**
+ * Set ADC fault injection mode.
+ * Faults persist until explicitly cleared with SIM_ADC_NORMAL.
+ */
+void sim_adc_set_mode(SimAdcMode mode);
+
+/**
+ * Set noise amplitude for SIM_ADC_NOISY mode.
+ * Noise is +/- amplitude from the actual value.
+ */
+void sim_adc_set_noise_amplitude(uint8_t amplitude);
+
+/**
+ * Get current ADC fault mode.
+ */
+SimAdcMode sim_adc_get_mode(void);
+
+/**
+ * Set EEPROM fault injection mode.
+ * Faults persist until explicitly cleared with SIM_EEPROM_NORMAL.
+ */
+void sim_eeprom_set_mode(SimEepromMode mode);
+
+/**
+ * Get current EEPROM fault mode.
+ */
+SimEepromMode sim_eeprom_get_mode(void);
+
 /**
  * Get the simulator HAL interface.
  * Assign to p_hal before running app code.

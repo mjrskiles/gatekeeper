@@ -57,23 +57,50 @@ Output LED is driven directly from the buffered output circuit, not GPIO.
 
 ## Module Descriptions
 
+### Directory Structure
+
+The codebase is split into reusable library code (`lib/`) and application-specific code (`src/`):
+
+```
+lib/                    # Reusable library code (headers alongside sources)
+├── events/             # Event processor state machine
+├── fsm/                # Generic table-driven FSM engine
+├── hardware/           # HAL interface (hal_interface.h)
+├── input/              # Button debouncing, CV input
+├── output/             # CV output, LED animation, Neopixel driver
+└── utility/            # Delay, PROGMEM, status utilities
+
+src/                    # Application-specific code (headers alongside sources)
+├── config/             # Mode configuration
+├── core/               # Coordinator, states
+├── hardware/           # HAL implementation (hal.c, hal.h)
+├── modes/              # Mode handlers
+├── output/             # LED feedback
+├── app_init.c/.h       # Startup, settings
+└── main.c              # Entry point
+```
+
 ### Core Modules
 
 | Module | Location | Purpose |
 |--------|----------|---------|
-| `core/coordinator` | `src/core/coordinator.c` | Application coordinator - manages FSM hierarchy, routes events |
-| `fsm/fsm` | `src/fsm/fsm.c` | Generic table-driven FSM engine (reusable library) |
-| `events/events` | `src/events/events.c` | Event processor - button gestures, CV edge detection |
-| `modes/mode_handlers` | `src/modes/mode_handlers.c` | Signal processing modes (Gate, Trigger, Toggle, Divide, Cycle) |
-| `input/cv_input` | `src/input/cv_input.c` | Analog CV input with software hysteresis |
-| `hardware/hal` | `src/hardware/hal.c` | Hardware abstraction layer |
-| `input/button` | `src/input/button.c` | Button debouncing and edge detection |
-| `output/cv_output` | `src/output/cv_output.c` | CV output behaviors |
-| `app_init` | `src/app_init.c` | Startup, EEPROM settings, factory reset |
+| `coordinator` | `src/core/` | Application coordinator - manages FSM hierarchy, routes events |
+| `fsm` | `lib/fsm/` | Generic table-driven FSM engine (reusable library) |
+| `events` | `lib/events/` | Event processor - button gestures, CV edge detection |
+| `mode_handlers` | `src/modes/` | Signal processing modes (Gate, Trigger, Toggle, Divide, Cycle) |
+| `cv_input` | `lib/input/` | Analog CV input with software hysteresis |
+| `button` | `lib/input/` | Button debouncing and edge detection |
+| `hal` | `src/hardware/` | Hardware abstraction layer (ATtiny85 implementation) |
+| `hal_interface` | `lib/hardware/` | HAL interface definition |
+| `cv_output` | `lib/output/` | CV output behaviors |
+| `led_animation` | `lib/output/` | Blink/glow animation engine |
+| `neopixel` | `lib/output/` | WS2812B bit-banged driver |
+| `led_feedback` | `src/output/` | High-level LED control (mode colors, activity) |
+| `app_init` | `src/` | Startup, EEPROM settings, factory reset |
 
 ### Coordinator
 
-Location: `src/core/coordinator.c`, `include/core/coordinator.h`
+Location: `src/core/coordinator.c`, `src/core/coordinator.h`
 
 The coordinator is the **main application logic**. It manages a three-level
 FSM hierarchy and routes events to the appropriate state machine.
@@ -111,13 +138,17 @@ FSM hierarchy and routes events to the appropriate state machine.
 6. In PERFORM state: run mode handler with button B state
 ```
 
-**Compound Gestures**:
-- `EVT_MENU_TOGGLE`: Hold A, then hold B → enter/exit menu
-- `EVT_MODE_NEXT`: Hold B, then hold A → cycle to next mode
+**Gestures**:
+- `EVT_MENU_TOGGLE`: Hold A, then hold B → enter menu
+- `EVT_A_HOLD` (in menu): Hold A alone → exit menu immediately
+- `EVT_MODE_NEXT`: Hold A alone, then release → cycle to next mode
+
+Note: If B is pressed during an A hold, the solo A gestures (menu exit, mode change)
+are cancelled. This prevents accidental triggers when entering menu.
 
 ### FSM Engine
 
-Location: `src/fsm/fsm.c`, `include/fsm/fsm.h`
+Location: `lib/fsm/fsm.c`, `lib/fsm/fsm.h`
 
 Generic table-driven finite state machine engine. Transition tables are
 stored in PROGMEM to conserve RAM.
@@ -153,7 +184,7 @@ See [ADR-003](planning/decision-records/archive/003-fsm-state-management.md) for
 
 ### Event Processor
 
-Location: `src/events/events.c`, `include/events/events.h`
+Location: `lib/events/events.c`, `lib/events/events.h`
 
 Transforms raw button/CV inputs into semantic events with timing for
 press vs release, tap vs hold, and compound gestures.
@@ -163,8 +194,9 @@ press vs release, tap vs hold, and compound gestures.
 |----------|--------|
 | Performance (immediate) | `EVT_A_PRESS`, `EVT_B_PRESS`, `EVT_CV_RISE`, `EVT_CV_FALL` |
 | Configuration (on release) | `EVT_A_TAP`, `EVT_A_RELEASE`, `EVT_B_TAP`, `EVT_B_RELEASE` |
-| Hold (threshold reached) | `EVT_A_HOLD`, `EVT_B_HOLD` |
-| Compound gestures | `EVT_MENU_TOGGLE`, `EVT_MODE_NEXT` |
+| Hold (solo A only) | `EVT_A_HOLD` (only fires if B not pressed) |
+| Hold (B always) | `EVT_B_HOLD` |
+| Gestures | `EVT_MENU_TOGGLE` (A+B hold), `EVT_MODE_NEXT` (solo A hold+release) |
 
 **Timing Constants**:
 ```c
@@ -184,7 +216,7 @@ Uses status bitmask instead of multiple bools to save RAM:
 
 ### Mode Handlers
 
-Location: `src/modes/mode_handlers.c`, `include/modes/mode_handlers.h`
+Location: `src/modes/mode_handlers.c`, `src/modes/mode_handlers.h`
 
 Implements the five signal processing modes. Each mode has its own context
 struct; they share memory via a union since only one is active at a time.
@@ -206,7 +238,7 @@ struct; they share memory via a union since only one is active at a time.
 
 ### HAL (Hardware Abstraction Layer)
 
-Location: `src/hardware/hal.c`, `include/hardware/hal_interface.h`
+Location: `src/hardware/hal.c`, `lib/hardware/hal_interface.h`
 
 The HAL provides a swappable interface for hardware access. A global
 pointer `p_hal` references the active implementation.
@@ -244,7 +276,7 @@ extern HalInterface *p_hal;
 **Implementations**:
 - Production: `src/hardware/hal.c` (real ATtiny85 hardware)
 - Tests: `test/unit/mocks/mock_hal.c` (virtual pins, controllable time)
-- Simulator: `sim/sim_hal.c` (x86 with virtual hardware)
+- Simulator: `sim/sim_hal.c` (native with virtual hardware)
 
 **Timer**: Timer0 runs in CTC mode with prescaler 8, generating a 1ms
 interrupt. Uses 16-bit counter in ISR (atomic) with 32-bit extension in
@@ -252,7 +284,7 @@ interrupt. Uses 16-bit counter in ISR (atomic) with 32-bit extension in
 
 ### App Initialization
 
-Location: `src/app_init.c`, `include/app_init.h`
+Location: `src/app_init.c`, `src/app_init.h`
 
 Handles startup tasks before entering the main application loop:
 
@@ -275,7 +307,7 @@ See [FDP-001](planning/feature-designs/archive/FDP-001-app-init.md) for detailed
 
 ### CV Input
 
-Location: `src/input/cv_input.c`, `include/input/cv_input.h`
+Location: `lib/input/cv_input.c`, `lib/input/cv_input.h`
 
 Processes analog CV input with software hysteresis (Schmitt trigger).
 
@@ -289,7 +321,7 @@ See [ADR-004](planning/decision-records/004-analog-cv-input.md) for design ratio
 
 ### Button
 
-Location: `src/input/button.c`
+Location: `lib/input/button.c`, `lib/input/button.h`
 
 Handles debouncing and edge detection for button input.
 
@@ -305,7 +337,7 @@ Handles debouncing and edge detection for button input.
 
 ### CV Output
 
-Location: `src/output/cv_output.c`
+Location: `lib/output/cv_output.c`, `lib/output/cv_output.h`
 
 Low-level output pin management. Mode-specific behavior is implemented
 in mode_handlers.c; this module provides the output abstraction.
@@ -362,10 +394,9 @@ provides:
 
 **Running tests**:
 ```sh
-mkdir build_tests && cd build_tests
-cmake -DBUILD_TESTS=ON ..
-cmake --build .
-./test/unit/gatekeeper_unit_tests
+cmake --preset tests && cmake --build --preset tests
+ctest --preset tests
+# Or directly: ./build/tests/test/unit/gatekeeper_unit_tests
 ```
 
 **Test organization**: Each module has a corresponding test file in
@@ -374,27 +405,25 @@ between modules.
 
 ## Build System
 
-CMake-based build with three configurations:
+CMake-based build with three configurations using presets:
 
-**Firmware build** (default):
+**Firmware build**:
 ```sh
-mkdir build && cd build
-cmake ..
-cmake --build .
+cmake --preset firmware && cmake --build --preset firmware
 ```
-Produces `gatekeeper.hex` for flashing.
+Produces `build/firmware/gatekeeper.hex` for flashing.
 
 **Test build**:
 ```sh
-cmake -DBUILD_TESTS=ON ..
+cmake --preset tests && cmake --build --preset tests
 ```
 Compiles with host GCC, defines `TEST_BUILD` macro, links Unity.
 
 **Simulator build**:
 ```sh
-cmake -DBUILD_SIM=ON ..
+cmake --preset sim && cmake --build --preset sim
 ```
-Compiles x86 simulator with interactive terminal UI, JSON output, or batch mode.
+Compiles native simulator with interactive terminal UI, JSON output, or batch mode.
 
 **Flashing**:
 ```sh
@@ -427,8 +456,8 @@ The ATtiny85 has limited resources:
 
 ### Adding a New Mode
 
-1. Add enum value to `ModeState` in `include/core/states.h`
-2. Add context struct to `ModeContext` union in `include/modes/mode_handlers.h`
+1. Add enum value to `ModeState` in `src/core/states.h`
+2. Add context struct to `ModeContext` union in `src/modes/mode_handlers.h`
 3. Implement `mode_handler_init()` case in `src/modes/mode_handlers.c`
 4. Implement `mode_handler_process()` case
 5. Add LED color in `mode_handler_get_feedback()`
@@ -444,7 +473,7 @@ The ATtiny85 has limited resources:
 
 ### Adding a New Event
 
-1. Add enum value to `Event` in `include/events/events.h`
+1. Add enum value to `Event` in `lib/events/events.h`
 2. Add detection logic in `event_processor_update()`
 3. Add handling in coordinator or FSM transition tables
 4. Add tests in `test/unit/fsm/test_events.h`

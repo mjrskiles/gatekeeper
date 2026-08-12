@@ -128,11 +128,8 @@ static void terminal_render(Renderer *self, const SimState *state) {
     // Controls
     printf("\033[2m──────────────────────────────────────────────────────\033[0m\033[K\n");
     printf("  [A] Button A    [B] Button B    [C] Toggle CV\033[K\n");
-    printf("  [+/-] CV Volts  [R] Reset       [F] Fast/Real  [Q] Quit\033[K\n");
+    printf("  [+/-] CV Volts  [R] Reset       [L] Legend     [Q] Quit\033[K\n");
     printf("\033[2m──────────────────────────────────────────────────────\033[0m\033[K\n\n");
-
-    // Mode indicator
-    printf("  Speed: %-25s\033[K\n", state->realtime_mode ? "Realtime (1ms tick)" : "Fast-forward");
 
     // Legend (if visible)
     if (state->legend_visible) {

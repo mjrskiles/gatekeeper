@@ -1,0 +1,351 @@
+(*
+ * GKS - Gatekeeper Script Language
+ * EBNF Grammar Specification
+ *
+ * Version: 1.6
+ *
+ * A simple, line-oriented scripting language for testing the Gatekeeper
+ * simulator. Provides low-level hardware primitives with user-defined
+ * commands and timers for building abstractions.
+ *
+ * Design principles:
+ *   - Primitives map directly to HAL operations
+ *   - User builds abstractions via 'def' and 'timer'
+ *   - Composition via 'include' with flat module namespace
+ *   - Keep it simple - no control flow, no variables
+ *
+ * Lexical conventions:
+ *   - Lexer skips horizontal whitespace (spaces, tabs) between tokens
+ *   - Lexer emits EOL tokens for newlines (line structure is significant)
+ *   - Keywords are case-insensitive
+ *   - Identifiers are case-sensitive
+ *   - Comments (# to EOL) are stripped by lexer
+ *)
+
+(* ========== Top-Level Structure ========== *)
+
+script          = { line } EOF ;
+
+line            = statement EOL
+                | EOL ;                             (* blank line *)
+
+statement       = const_decl
+                | definition
+                | timer_def
+                | command ;
+
+
+(* ========== Constants ========== *)
+
+(*
+ * CONST - Named values for readability.
+ * File-scoped, immutable. Simple arithmetic allowed.
+ *
+ * Examples:
+ *   const THRESHOLD = 128
+ *   const DEBOUNCE = 50
+ *   const CV_HIGH = 255 / 2
+ *)
+const_decl      = 'const' identifier '=' const_expr ;
+
+const_expr      = const_term { ( '+' | '-' ) const_term } ;
+const_term      = const_factor { ( '*' | '/' | '%' ) const_factor } ;
+const_factor    = [ '-' ] const_primary ;
+const_primary   = integer
+                | voltage
+                | const_ref                         (* reference to another const *)
+                | '(' const_expr ')' ;
+
+
+(* ========== User Definitions ========== *)
+
+(*
+ * DEF - User-defined command sequences.
+ * Two-pass parsing allows forward references.
+ *
+ * Example:
+ *   def press_a
+ *     set pin.a low
+ *   end
+ *
+ *   def tap_a
+ *     press_a
+ *     wait 50
+ *     release_a      # forward reference OK
+ *   end
+ *)
+definition      = 'def' identifier EOL
+                  { command EOL }
+                  'end' ;
+
+
+(* ========== Timers ========== *)
+
+(*
+ * TIMER - Periodic command sequences.
+ * Interval in milliseconds. Optional count limits iterations.
+ * Without count, timer runs until script ends or 'quit'.
+ *
+ * Example:
+ *   timer pulse_clock 1000 count 5
+ *     set pin.a low
+ *     +50 set pin.a high
+ *   end
+ *
+ *   @0 pulse_clock            # start at time 0
+ *
+ * Finite timers (with count) are fully expanded at parse time.
+ * The body executes at t=0, t=interval, t=2*interval, etc.
+ * Times within body are relative to each iteration start.
+ *)
+timer_def       = 'timer' identifier integer [ 'count' integer ] EOL
+                  { command EOL }
+                  'end' ;
+
+
+(* ========== Commands ========== *)
+
+command         = [ time_prefix ] action ;
+
+(*
+ * Time prefixes:
+ *   @N  - execute at absolute time N ms (since sim start)
+ *   +N  - wait N ms, then execute
+ *   N   - same as +N (shorthand)
+ *   (none) - execute immediately
+ *)
+time_prefix     = '@' integer                       (* absolute time *)
+                | '+' integer                       (* relative delay *)
+                | integer ;                         (* relative shorthand *)
+
+action          = set_cmd
+                | assert_cmd
+                | wait_cmd
+                | trigger_cmd
+                | log_cmd
+                | fault_cmd
+                | inspect_cmd
+                | include_cmd
+                | flow_cmd
+                | user_call ;                       (* user-defined command or timer *)
+
+(*
+ * User calls can be local (press_a) or qualified (buttons.press_a).
+ * Qualified names reference defs/timers from included modules.
+ *)
+user_call       = identifier [ '.' identifier ] ;
+
+
+(* ========== Hardware Primitives ========== *)
+
+(*
+ * SET - Inject hardware state.
+ *
+ * Examples:
+ *   set pin.a low         # button A pressed (active-low)
+ *   set pin.a high        # button A released
+ *   set adc.cv 128        # CV = 128 (mid-scale)
+ *   set adc.cv 2.5v       # CV = 2.5V
+ *   set adc.cv THRESHOLD  # use constant
+ *)
+set_cmd         = 'set' hw_target value ;
+
+hw_target       = pin_target | adc_target ;
+pin_target      = 'pin.' pin_name ;
+pin_name        = 'a' | 'b' | 'output' | identifier ;
+adc_target      = 'adc.' adc_channel ;
+adc_channel     = 'cv' | integer | identifier ;
+
+value           = pin_state | integer | voltage | const_ref ;
+pin_state       = 'high' | 'low' | '1' | '0' ;
+const_ref       = identifier [ '.' identifier ] ;  (* local or module.CONST *)
+
+
+(*
+ * ASSERT - Verify hardware state.
+ *
+ * Examples:
+ *   assert pin.output high
+ *   assert adc.cv 128
+ *)
+assert_cmd      = 'assert' hw_target value ;
+
+
+(*
+ * TRIGGER - Inject hardware events.
+ *
+ * Examples:
+ *   trigger wdt           # watchdog timeout
+ *   trigger reset         # MCU reset
+ *   trigger int.timer0    # timer interrupt
+ *)
+trigger_cmd     = 'trigger' trigger_source ;
+trigger_source  = 'wdt' | 'reset' | 'int.' identifier ;
+
+
+(* ========== Timing ========== *)
+
+(*
+ * WAIT - Advance simulation time.
+ *
+ * Examples:
+ *   wait 100
+ *   wait DEBOUNCE
+ *)
+wait_cmd        = 'wait' ( integer | identifier ) ;
+
+
+(* ========== Fault Injection ========== *)
+
+(*
+ * FAULT - Inject hardware faults.
+ *
+ * Examples:
+ *   fault adc timeout
+ *   fault eeprom write_fail
+ *   fault adc normal        # clear fault
+ *)
+fault_cmd       = 'fault' subsystem fault_mode ;
+subsystem       = 'adc' | 'eeprom' | 'timer' | 'watchdog' ;
+fault_mode      = 'normal' | 'timeout' | 'stuck_low' | 'stuck_high'
+                | 'noisy' | 'write_fail' | 'read_ff' | 'corrupt' ;
+
+
+(* ========== Inspection ========== *)
+
+(*
+ * INSPECT - Query simulation state.
+ *
+ * Examples:
+ *   inspect state
+ *   inspect memory 0x60
+ *   inspect pin.output
+ *)
+inspect_cmd     = 'inspect' inspect_target ;
+inspect_target  = 'state'
+                | 'memory' address
+                | 'register' identifier
+                | hw_target ;
+address         = integer ;
+
+
+(* ========== Composition ========== *)
+
+(*
+ * INCLUDE - Include another GKS file.
+ * Creates a module with name derived from filename (sans .gks).
+ * All defs/timers from included file are accessed as module.name.
+ *
+ * Examples:
+ *   include "stdlib.gks"        # stdlib.press_a, stdlib.tap_a
+ *   include "lib/buttons.gks"   # buttons.press_a (not lib.buttons.*)
+ *
+ * Module namespace is flat - nested includes don't create nested prefixes.
+ * Each included file must have a unique base name.
+ *)
+include_cmd     = 'include' filepath ;
+filepath        = quoted_string | unquoted_path ;
+unquoted_path   = path_char { path_char } ;
+path_char       = letter | digit | '_' | '-' | '.' | '/' ;
+
+
+(* ========== Logging ========== *)
+
+(*
+ * LOG - Print timestamped message.
+ *)
+log_cmd         = 'log' string ;
+
+
+(* ========== Flow Control ========== *)
+
+(*
+ * Script control commands.
+ *)
+flow_cmd        = 'quit'
+                | 'fail' [ string ]
+                | 'break'                           (* exit def early *)
+                | 'continue' ;                      (* reserved *)
+
+
+(* ========== Tokens ========== *)
+
+identifier      = letter { letter | digit | '_' } ;
+
+integer         = decimal_int | hex_int | binary_int ;
+decimal_int     = digit { digit } ;
+hex_int         = ( '0x' | '0X' ) hex_digit { hex_digit } ;
+binary_int      = ( '0b' | '0B' ) bin_digit { bin_digit } ;
+
+voltage         = decimal 'v' ;
+decimal         = digit { digit } [ '.' digit { digit } ] ;
+
+string          = quoted_string ;
+quoted_string   = '"' { string_char } '"' ;
+string_char     = ? any char except '"' or newline ?
+                | '\\"' | '\\\\' ;
+
+letter          = 'a'..'z' | 'A'..'Z' ;
+digit           = '0'..'9' ;
+hex_digit       = digit | 'a'..'f' | 'A'..'F' ;
+bin_digit       = '0' | '1' ;
+
+EOL             = '\n' | '\r\n' | '\r' ;
+EOF             = ? end of input ? ;
+
+
+(* ========== Semantic Notes ========== *)
+
+(*
+ * 1. TIME MODEL
+ *    - Virtual clock in milliseconds from sim start
+ *    - No prefix = execute now (at current time)
+ *    - 'wait N' advances clock by N ms
+ *    - '@N' executes when clock reaches N (absolute scheduling)
+ *    - '+N' waits N ms then executes (relative delay)
+ *    - Resolver builds sorted timeline from all @N commands
+ *
+ * 2. CONSTANTS
+ *    - File-scoped, must be defined before use
+ *    - Simple arithmetic: +, -, *, /, %
+ *    - Can reference other constants (no forward refs)
+ *    - Evaluated at parse time
+ *
+ * 3. DEFINITIONS
+ *    - Two-pass: defs collected first, forward refs OK
+ *    - Cannot be recursive (enforced at resolve time)
+ *    - Cannot be redefined in same file
+ *    - Called by name: press_a or module.press_a
+ *
+ * 4. TIMERS
+ *    - Periodic execution with interval in ms
+ *    - With 'count N': expands to N iterations at parse time
+ *    - Without count: runs until script ends (executor handles)
+ *    - Times in body are relative to each iteration start
+ *    - Started by calling timer name: @0 my_timer
+ *
+ * 5. MODULES (INCLUDE)
+ *    - Each file becomes a module named after its basename
+ *    - "lib/buttons.gks" → module "buttons"
+ *    - Access via qualified name: buttons.press_a
+ *    - Flat namespace: no nested prefixes like a.b.c
+ *    - Circular includes detected and reported as error
+ *    - Duplicate module names (from different paths) are errors
+ *
+ * 6. VOLTAGE CONVERSION
+ *    - 0.0v = 0, 5.0v = 255
+ *    - adc = (voltage / 5.0) * 255
+ *
+ * 7. PIN NAMING
+ *    - pin.a = Button A (PB2, active-low)
+ *    - pin.b = Button B (PB4, active-low)
+ *    - pin.output = Signal output (PB1)
+ *
+ * 8. ERROR HANDLING
+ *    - Errors include file, line, column, and source context
+ *    - Undefined names suggest similar matches ("did you mean?")
+ *    - Parse errors halt immediately
+ *    - Assert failures set exit code 1
+ *    - 'fail' halts with exit code 1
+ *    - 'quit' halts with exit code 0
+ *)

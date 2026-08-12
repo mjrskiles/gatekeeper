@@ -1,23 +1,23 @@
 #include "command_handler.h"
 #include "sim_hal.h"
+#include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 /**
  * @file command_handler.c
- * @brief JSON command parser implementation
+ * @brief JSON command parser implementation using cJSON
  *
- * Simple hand-rolled JSON parser for command protocol.
- * Only handles the specific structures we need.
+ * Parses JSON commands for controlling the simulator.
  */
 
 // Command type names
 static const char *cmd_type_names[] = {
     "unknown", "button", "cv_manual", "cv_lfo", "cv_envelope",
-    "cv_gate", "cv_trigger", "cv_wavetable", "reset", "quit"
+    "cv_gate", "cv_trigger", "cv_wavetable", "fault_adc", "fault_eeprom",
+    "reset", "quit"
 };
 
 const char* command_type_str(CommandType type) {
@@ -28,217 +28,81 @@ const char* command_type_str(CommandType type) {
 }
 
 // =============================================================================
-// Simple JSON Parser
-// =============================================================================
-
-// Skip whitespace
-static const char* skip_ws(const char *p) {
-    while (*p && isspace(*p)) p++;
-    return p;
-}
-
-// Parse string value (returns pointer past closing quote, or NULL on error)
-// Writes string to buf (up to buf_size-1 chars)
-static const char* parse_string(const char *p, char *buf, size_t buf_size) {
-    p = skip_ws(p);
-    if (*p != '"') return NULL;
-    p++;
-
-    size_t i = 0;
-    while (*p && *p != '"') {
-        if (*p == '\\' && *(p + 1)) {
-            p++;  // Skip escape char, take next literally
-        }
-        if (i < buf_size - 1) {
-            buf[i++] = *p;
-        }
-        p++;
-    }
-    buf[i] = '\0';
-
-    if (*p != '"') return NULL;
-    return p + 1;
-}
-
-// Parse number (int or float)
-static const char* parse_number(const char *p, double *value) {
-    p = skip_ws(p);
-    char *end;
-    *value = strtod(p, &end);
-    if (end == p) return NULL;
-    return end;
-}
-
-// Parse boolean
-static const char* parse_bool(const char *p, bool *value) {
-    p = skip_ws(p);
-    if (strncmp(p, "true", 4) == 0) {
-        *value = true;
-        return p + 4;
-    }
-    if (strncmp(p, "false", 5) == 0) {
-        *value = false;
-        return p + 5;
-    }
-    return NULL;
-}
-
-// Find key in JSON object and return pointer to value
-// Assumes p points to start of object (after '{')
-static const char* find_key(const char *json, const char *key) {
-    const char *p = strchr(json, '{');
-    if (!p) return NULL;
-    p++;
-
-    char found_key[64];
-    while (*p) {
-        p = skip_ws(p);
-        if (*p == '}') return NULL;  // End of object
-        if (*p == ',') { p++; continue; }
-
-        // Parse key
-        const char *next = parse_string(p, found_key, sizeof(found_key));
-        if (!next) return NULL;
-        p = skip_ws(next);
-
-        // Expect colon
-        if (*p != ':') return NULL;
-        p++;
-        p = skip_ws(p);
-
-        // Check if this is our key
-        if (strcmp(found_key, key) == 0) {
-            return p;  // Return pointer to value
-        }
-
-        // Skip value (simplified: handles strings, numbers, bools, nested objects)
-        if (*p == '"') {
-            char dummy[256];
-            p = parse_string(p, dummy, sizeof(dummy));
-        } else if (*p == '{') {
-            // Skip nested object (count braces)
-            int depth = 1;
-            p++;
-            while (*p && depth > 0) {
-                if (*p == '{') depth++;
-                else if (*p == '}') depth--;
-                else if (*p == '"') {
-                    char dummy[256];
-                    p = parse_string(p, dummy, sizeof(dummy));
-                    if (!p) return NULL;
-                    continue;
-                }
-                p++;
-            }
-        } else if (*p == '[') {
-            // Skip array (count brackets)
-            int depth = 1;
-            p++;
-            while (*p && depth > 0) {
-                if (*p == '[') depth++;
-                else if (*p == ']') depth--;
-                p++;
-            }
-        } else {
-            // Number or bool - skip to next delimiter
-            while (*p && *p != ',' && *p != '}') p++;
-        }
-
-        if (!p) return NULL;
-    }
-    return NULL;
-}
-
-// Get string value for key
-static bool get_string(const char *json, const char *key, char *buf, size_t buf_size) {
-    const char *val = find_key(json, key);
-    if (!val) return false;
-    return parse_string(val, buf, buf_size) != NULL;
-}
-
-// Get number value for key
-static bool get_number(const char *json, const char *key, double *value) {
-    const char *val = find_key(json, key);
-    if (!val) return false;
-    return parse_number(val, value) != NULL;
-}
-
-// Get bool value for key
-static bool get_bool(const char *json, const char *key, bool *value) {
-    const char *val = find_key(json, key);
-    if (!val) return false;
-    return parse_bool(val, value) != NULL;
-}
-
-// =============================================================================
 // Command Handlers
 // =============================================================================
 
-static CommandResult handle_button(const char *json) {
+static CommandResult handle_button(cJSON *json) {
     CommandResult result = { CMD_BUTTON, false, false, "" };
 
-    char id[16];
-    bool state;
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(json, "id");
+    cJSON *state = cJSON_GetObjectItemCaseSensitive(json, "state");
 
-    if (!get_string(json, "id", id, sizeof(id))) {
+    if (!cJSON_IsString(id) || !id->valuestring) {
         snprintf(result.error, sizeof(result.error), "missing 'id' field");
         return result;
     }
-    if (!get_bool(json, "state", &state)) {
+    if (!cJSON_IsBool(state)) {
         snprintf(result.error, sizeof(result.error), "missing 'state' field");
         return result;
     }
 
-    if (strcmp(id, "a") == 0) {
-        sim_set_button_a(state);
+    if (strcmp(id->valuestring, "a") == 0) {
+        sim_set_button_a(cJSON_IsTrue(state));
         result.success = true;
-    } else if (strcmp(id, "b") == 0) {
-        sim_set_button_b(state);
+    } else if (strcmp(id->valuestring, "b") == 0) {
+        sim_set_button_b(cJSON_IsTrue(state));
         result.success = true;
     } else {
-        snprintf(result.error, sizeof(result.error), "invalid button id: %s", id);
+        snprintf(result.error, sizeof(result.error), "invalid button id: %s", id->valuestring);
     }
 
     return result;
 }
 
-static CommandResult handle_cv_manual(const char *json, CVSource *cv_source) {
+static CommandResult handle_cv_manual(cJSON *json, CVSource *cv_source) {
     CommandResult result = { CMD_CV_MANUAL, false, false, "" };
 
-    double value;
-    if (!get_number(json, "value", &value)) {
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(json, "value");
+    if (!cJSON_IsNumber(value)) {
         snprintf(result.error, sizeof(result.error), "missing 'value' field");
         return result;
     }
 
-    if (value < 0) value = 0;
-    if (value > 255) value = 255;
+    double v = value->valuedouble;
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
 
-    cv_source_set_manual(cv_source, (uint8_t)value);
+    cv_source_set_manual(cv_source, (uint8_t)v);
     result.success = true;
     return result;
 }
 
-static CommandResult handle_cv_lfo(const char *json, CVSource *cv_source) {
+static CommandResult handle_cv_lfo(cJSON *json, CVSource *cv_source) {
     CommandResult result = { CMD_CV_LFO, false, false, "" };
 
+    // Get optional parameters with defaults
     double freq_hz = 1.0;
     double min_val = 0;
     double max_val = 255;
-    char shape_str[16] = "sine";
+    const char *shape_str = "sine";
 
-    get_number(json, "freq_hz", &freq_hz);
-    get_number(json, "min", &min_val);
-    get_number(json, "max", &max_val);
-    get_string(json, "shape", shape_str, sizeof(shape_str));
+    cJSON *freq = cJSON_GetObjectItemCaseSensitive(json, "freq_hz");
+    cJSON *min_j = cJSON_GetObjectItemCaseSensitive(json, "min");
+    cJSON *max_j = cJSON_GetObjectItemCaseSensitive(json, "max");
+    cJSON *shape = cJSON_GetObjectItemCaseSensitive(json, "shape");
+
+    if (cJSON_IsNumber(freq)) freq_hz = freq->valuedouble;
+    if (cJSON_IsNumber(min_j)) min_val = min_j->valuedouble;
+    if (cJSON_IsNumber(max_j)) max_val = max_j->valuedouble;
+    if (cJSON_IsString(shape) && shape->valuestring) shape_str = shape->valuestring;
 
     // Parse shape
-    LFOShape shape = LFO_SINE;
-    if (strcmp(shape_str, "sine") == 0) shape = LFO_SINE;
-    else if (strcmp(shape_str, "tri") == 0 || strcmp(shape_str, "triangle") == 0) shape = LFO_TRI;
-    else if (strcmp(shape_str, "saw") == 0 || strcmp(shape_str, "sawtooth") == 0) shape = LFO_SAW;
-    else if (strcmp(shape_str, "square") == 0) shape = LFO_SQUARE;
-    else if (strcmp(shape_str, "random") == 0 || strcmp(shape_str, "sh") == 0) shape = LFO_RANDOM;
+    LFOShape lfo_shape = LFO_SINE;
+    if (strcmp(shape_str, "sine") == 0) lfo_shape = LFO_SINE;
+    else if (strcmp(shape_str, "tri") == 0 || strcmp(shape_str, "triangle") == 0) lfo_shape = LFO_TRI;
+    else if (strcmp(shape_str, "saw") == 0 || strcmp(shape_str, "sawtooth") == 0) lfo_shape = LFO_SAW;
+    else if (strcmp(shape_str, "square") == 0) lfo_shape = LFO_SQUARE;
+    else if (strcmp(shape_str, "random") == 0 || strcmp(shape_str, "sh") == 0) lfo_shape = LFO_RANDOM;
 
     // Clamp values
     if (freq_hz < 0.01) freq_hz = 0.01;
@@ -248,24 +112,30 @@ static CommandResult handle_cv_lfo(const char *json, CVSource *cv_source) {
     if (max_val < 0) max_val = 0;
     if (max_val > 255) max_val = 255;
 
-    cv_source_set_lfo(cv_source, (float)freq_hz, shape,
+    cv_source_set_lfo(cv_source, (float)freq_hz, lfo_shape,
                       (uint8_t)min_val, (uint8_t)max_val);
     result.success = true;
     return result;
 }
 
-static CommandResult handle_cv_envelope(const char *json, CVSource *cv_source) {
+static CommandResult handle_cv_envelope(cJSON *json, CVSource *cv_source) {
     CommandResult result = { CMD_CV_ENVELOPE, false, false, "" };
 
+    // Get optional parameters with defaults
     double attack = 10;
     double decay = 100;
     double sustain = 200;
     double release = 200;
 
-    get_number(json, "attack_ms", &attack);
-    get_number(json, "decay_ms", &decay);
-    get_number(json, "sustain", &sustain);
-    get_number(json, "release_ms", &release);
+    cJSON *attack_j = cJSON_GetObjectItemCaseSensitive(json, "attack_ms");
+    cJSON *decay_j = cJSON_GetObjectItemCaseSensitive(json, "decay_ms");
+    cJSON *sustain_j = cJSON_GetObjectItemCaseSensitive(json, "sustain");
+    cJSON *release_j = cJSON_GetObjectItemCaseSensitive(json, "release_ms");
+
+    if (cJSON_IsNumber(attack_j)) attack = attack_j->valuedouble;
+    if (cJSON_IsNumber(decay_j)) decay = decay_j->valuedouble;
+    if (cJSON_IsNumber(sustain_j)) sustain = sustain_j->valuedouble;
+    if (cJSON_IsNumber(release_j)) release = release_j->valuedouble;
 
     // Clamp values
     if (attack < 0) attack = 0;
@@ -283,16 +153,16 @@ static CommandResult handle_cv_envelope(const char *json, CVSource *cv_source) {
     return result;
 }
 
-static CommandResult handle_cv_gate(const char *json, CVSource *cv_source) {
+static CommandResult handle_cv_gate(cJSON *json, CVSource *cv_source) {
     CommandResult result = { CMD_CV_GATE, false, false, "" };
 
-    bool state;
-    if (!get_bool(json, "state", &state)) {
+    cJSON *state = cJSON_GetObjectItemCaseSensitive(json, "state");
+    if (!cJSON_IsBool(state)) {
         snprintf(result.error, sizeof(result.error), "missing 'state' field");
         return result;
     }
 
-    if (state) {
+    if (cJSON_IsTrue(state)) {
         cv_source_gate_on(cv_source);
     } else {
         cv_source_gate_off(cv_source);
@@ -307,58 +177,134 @@ static CommandResult handle_cv_trigger(CVSource *cv_source) {
     return result;
 }
 
+static CommandResult handle_fault_adc(cJSON *json) {
+    CommandResult result = { CMD_FAULT_ADC, false, false, "" };
+
+    cJSON *mode = cJSON_GetObjectItemCaseSensitive(json, "mode");
+    if (!cJSON_IsString(mode) || !mode->valuestring) {
+        snprintf(result.error, sizeof(result.error), "missing 'mode' field");
+        return result;
+    }
+
+    // Parse mode string
+    if (strcmp(mode->valuestring, "normal") == 0) {
+        sim_adc_set_mode(SIM_ADC_NORMAL);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "timeout") == 0) {
+        sim_adc_set_mode(SIM_ADC_TIMEOUT);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "stuck_low") == 0) {
+        sim_adc_set_mode(SIM_ADC_STUCK_LOW);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "stuck_high") == 0) {
+        sim_adc_set_mode(SIM_ADC_STUCK_HIGH);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "noisy") == 0) {
+        sim_adc_set_mode(SIM_ADC_NOISY);
+        // Optional amplitude parameter
+        cJSON *amplitude = cJSON_GetObjectItemCaseSensitive(json, "amplitude");
+        if (cJSON_IsNumber(amplitude)) {
+            int amp = (int)amplitude->valuedouble;
+            if (amp < 0) amp = 0;
+            if (amp > 127) amp = 127;
+            sim_adc_set_noise_amplitude((uint8_t)amp);
+        }
+        result.success = true;
+    } else {
+        snprintf(result.error, sizeof(result.error), "invalid mode: %s", mode->valuestring);
+    }
+
+    return result;
+}
+
+static CommandResult handle_fault_eeprom(cJSON *json) {
+    CommandResult result = { CMD_FAULT_EEPROM, false, false, "" };
+
+    cJSON *mode = cJSON_GetObjectItemCaseSensitive(json, "mode");
+    if (!cJSON_IsString(mode) || !mode->valuestring) {
+        snprintf(result.error, sizeof(result.error), "missing 'mode' field");
+        return result;
+    }
+
+    // Parse mode string
+    if (strcmp(mode->valuestring, "normal") == 0) {
+        sim_eeprom_set_mode(SIM_EEPROM_NORMAL);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "write_fail") == 0) {
+        sim_eeprom_set_mode(SIM_EEPROM_WRITE_FAIL);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "read_ff") == 0) {
+        sim_eeprom_set_mode(SIM_EEPROM_READ_FF);
+        result.success = true;
+    } else if (strcmp(mode->valuestring, "corrupt") == 0) {
+        sim_eeprom_set_mode(SIM_EEPROM_CORRUPT);
+        result.success = true;
+    } else {
+        snprintf(result.error, sizeof(result.error), "invalid mode: %s", mode->valuestring);
+    }
+
+    return result;
+}
+
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
-CommandResult command_handler_execute(const char *json, CVSource *cv_source) {
+CommandResult command_handler_execute(const char *json_str, CVSource *cv_source) {
     CommandResult result = { CMD_UNKNOWN, false, false, "" };
 
-    if (!json || !cv_source) {
+    if (!json_str || !cv_source) {
         snprintf(result.error, sizeof(result.error), "null argument");
         return result;
     }
 
+    // Parse JSON
+    cJSON *json = cJSON_Parse(json_str);
+    if (!json) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        snprintf(result.error, sizeof(result.error),
+                 "JSON parse error near: %.30s", error_ptr ? error_ptr : "unknown");
+        return result;
+    }
+
     // Get command type
-    char cmd[32];
-    if (!get_string(json, "cmd", cmd, sizeof(cmd))) {
+    cJSON *cmd = cJSON_GetObjectItemCaseSensitive(json, "cmd");
+    if (!cJSON_IsString(cmd) || !cmd->valuestring) {
         snprintf(result.error, sizeof(result.error), "missing 'cmd' field");
+        cJSON_Delete(json);
         return result;
     }
 
     // Dispatch to handler
-    if (strcmp(cmd, "button") == 0) {
-        return handle_button(json);
-    }
-    if (strcmp(cmd, "cv_manual") == 0) {
-        return handle_cv_manual(json, cv_source);
-    }
-    if (strcmp(cmd, "cv_lfo") == 0) {
-        return handle_cv_lfo(json, cv_source);
-    }
-    if (strcmp(cmd, "cv_envelope") == 0) {
-        return handle_cv_envelope(json, cv_source);
-    }
-    if (strcmp(cmd, "cv_gate") == 0) {
-        return handle_cv_gate(json, cv_source);
-    }
-    if (strcmp(cmd, "cv_trigger") == 0) {
-        return handle_cv_trigger(cv_source);
-    }
-    if (strcmp(cmd, "reset") == 0) {
+    if (strcmp(cmd->valuestring, "button") == 0) {
+        result = handle_button(json);
+    } else if (strcmp(cmd->valuestring, "cv_manual") == 0) {
+        result = handle_cv_manual(json, cv_source);
+    } else if (strcmp(cmd->valuestring, "cv_lfo") == 0) {
+        result = handle_cv_lfo(json, cv_source);
+    } else if (strcmp(cmd->valuestring, "cv_envelope") == 0) {
+        result = handle_cv_envelope(json, cv_source);
+    } else if (strcmp(cmd->valuestring, "cv_gate") == 0) {
+        result = handle_cv_gate(json, cv_source);
+    } else if (strcmp(cmd->valuestring, "cv_trigger") == 0) {
+        result = handle_cv_trigger(cv_source);
+    } else if (strcmp(cmd->valuestring, "fault_adc") == 0) {
+        result = handle_fault_adc(json);
+    } else if (strcmp(cmd->valuestring, "fault_eeprom") == 0) {
+        result = handle_fault_eeprom(json);
+    } else if (strcmp(cmd->valuestring, "reset") == 0) {
         sim_reset_time();
         cv_source_init(cv_source);
         result.type = CMD_RESET;
         result.success = true;
-        return result;
-    }
-    if (strcmp(cmd, "quit") == 0) {
+    } else if (strcmp(cmd->valuestring, "quit") == 0) {
         result.type = CMD_QUIT;
         result.success = true;
         result.should_quit = true;
-        return result;
+    } else {
+        snprintf(result.error, sizeof(result.error), "unknown command: %s", cmd->valuestring);
     }
 
-    snprintf(result.error, sizeof(result.error), "unknown command: %s", cmd);
+    cJSON_Delete(json);
     return result;
 }

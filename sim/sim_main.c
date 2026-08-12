@@ -48,7 +48,7 @@ CVSource* sim_get_cv_source(void) {
 #define TAP_AUTO_RELEASE_MS 200
 
 static void print_usage(const char *progname) {
-    printf("Gatekeeper x86 Simulator\n\n");
+    printf("Gatekeeper Native Simulator\n\n");
     printf("Usage: %s [options]\n\n", progname);
     printf("Options:\n");
     printf("  --script <file>  Run script file instead of interactive mode\n");
@@ -56,7 +56,6 @@ static void print_usage(const char *progname) {
     printf("  --json           JSON output: one object per state change\n");
     printf("  --json-stream    JSON stream: continuous output at fixed interval\n");
     printf("  --socket [path]  Enable socket server (default: %s)\n", SOCKET_DEFAULT_PATH);
-    printf("  --fast           Run in fast-forward mode (interactive only)\n");
     printf("  --help           Show this help message\n");
     printf("\n");
     printf("Interactive Controls:\n");
@@ -68,7 +67,6 @@ static void print_usage(const char *progname) {
     printf("  +/-        Adjust CV voltage (+/- 0.2V)\n");
     printf("  l          Cycle LFO (off -> 1Hz sine -> 2Hz tri -> 4Hz square -> off)\n");
     printf("  R          Reset time\n");
-    printf("  F          Toggle fast/realtime mode\n");
     printf("  L          Toggle legend\n");
     printf("  Q / ESC    Quit\n");
     printf("\n");
@@ -168,7 +166,6 @@ static void track_state_changes(Coordinator *coord) {
 }
 
 int main(int argc, char **argv) {
-    bool fast_mode = false;
     bool batch_mode = false;
     bool json_mode = false;
     bool json_stream = false;
@@ -178,9 +175,7 @@ int main(int argc, char **argv) {
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--fast") == 0) {
-            fast_mode = true;
-        } else if (strcmp(argv[i], "--batch") == 0) {
+        if (strcmp(argv[i], "--batch") == 0) {
             batch_mode = true;
         } else if (strcmp(argv[i], "--json") == 0) {
             json_mode = true;
@@ -244,10 +239,6 @@ int main(int argc, char **argv) {
         input_source->cleanup(input_source);
         return 1;
     }
-
-    // Set initial mode based on input source
-    bool realtime = !fast_mode && input_source->is_realtime(input_source);
-    sim_state_set_realtime(&sim_state, realtime);
 
     // Initialize renderer
     renderer->init(renderer);
@@ -383,14 +374,15 @@ int main(int argc, char **argv) {
         // Advance simulated time
         p_hal->advance_time(1);
 
-        // Real-time pacing if needed
-        if (sim_state.realtime_mode && input_source->is_realtime(input_source)) {
+        // Real-time pacing for interactive mode (keyboard input)
+        bool realtime = input_source->is_realtime(input_source);
+        if (realtime) {
             usleep(1000);  // 1ms
         }
 
         // Render periodically or on state change
         uint32_t now = p_hal->millis();
-        uint32_t render_interval = sim_state.realtime_mode ? 100 : 500;
+        uint32_t render_interval = realtime ? 100 : 500;
         if (sim_state_is_dirty(&sim_state) || (now - last_render >= render_interval)) {
             renderer->render(renderer, &sim_state);
             sim_state_clear_dirty(&sim_state);

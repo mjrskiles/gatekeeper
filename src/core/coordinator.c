@@ -19,6 +19,7 @@
 
 static void action_enter_menu(void);
 static void action_exit_menu(void);
+static void action_exit_menu_on_hold(void);
 static void action_next_mode(void);
 static void action_next_page(void);
 static void action_cycle_value(void);
@@ -65,17 +66,17 @@ static const State menu_states[] PROGMEM_ATTR = {
 
 // Top-level transitions
 static const Transition top_transitions[] PROGMEM_ATTR = {
-    // Toggle menu: A:hold + B:hold gesture (same to enter and exit)
+    // Enter menu: A:hold + B:hold gesture
     { TOP_PERFORM, EVT_MENU_TOGGLE, TOP_MENU,    action_enter_menu },
-    { TOP_MENU,    EVT_MENU_TOGGLE, TOP_PERFORM, action_exit_menu },
 
-    // Exit menu: timeout
+    // Exit menu: A:hold (solo) fires immediately on hold threshold
+    { TOP_MENU,    EVT_A_HOLD,      TOP_PERFORM, action_exit_menu_on_hold },
     { TOP_MENU,    EVT_TIMEOUT,     TOP_PERFORM, action_exit_menu },
 };
 
-// Mode transitions (mode change gesture works from any mode)
+// Mode transitions (mode change gesture works from any mode in PERFORM)
 static const Transition mode_transitions[] PROGMEM_ATTR = {
-    // B:hold + A:hold = advance to next mode
+    // A:hold (solo) release = advance to next mode
     { FSM_ANY_STATE, EVT_MODE_NEXT, FSM_NO_TRANSITION, action_next_mode },
 };
 
@@ -113,6 +114,20 @@ static void action_exit_menu(void) {
         g_coord->settings->mode = fsm_get_state(&g_coord->mode_fsm);
         app_init_save_settings(g_coord->settings);
     }
+}
+
+static void action_exit_menu_on_hold(void) {
+    if (!g_coord) return;
+
+    // Save settings on menu exit
+    if (g_coord->settings) {
+        g_coord->settings->mode = fsm_get_state(&g_coord->mode_fsm);
+        app_init_save_settings(g_coord->settings);
+    }
+
+    // Set compound flag to prevent EVT_MODE_NEXT from firing on release
+    // (we don't want menu exit to also trigger mode change)
+    g_coord->events.ext_status |= EP_COMPOUND_FIRED;
 }
 
 static void action_next_mode(void) {
@@ -305,20 +320,31 @@ void coordinator_update(Coordinator *coord) {
     }
 
     // Update current mode (run mode handler)
-    // In perform mode, process input through mode handler
-    // Button B is the primary button (controls gate/trigger output)
+    // Signal processing runs in both PERFORM and MENU modes
+    // - PERFORM: CV input OR button B (and button A for some modes)
+    // - MENU: CV input only (buttons used for menu navigation)
+    ModeState mode = (ModeState)fsm_get_state(&coord->mode_fsm);
+    bool input_state;
+
     if (fsm_get_state(&coord->top_fsm) == TOP_PERFORM) {
-        ModeState mode = (ModeState)fsm_get_state(&coord->mode_fsm);
-        bool input_state = event_processor_b_pressed(&coord->events);
+        // In perform mode: CV OR button B
+        // Suppress B trigger when A is held (menu-enter gesture in progress)
+        bool b_triggers = event_processor_b_pressed(&coord->events) &&
+                          !event_processor_a_pressed(&coord->events);
+        input_state = cv_state || b_triggers;
 
         // In Gate mode with gate_a_mode enabled, button A also triggers
+        // (only when not already holding for menu gesture)
         if (mode == MODE_GATE && coord->settings &&
             coord->settings->gate_a_mode == GATE_A_MODE_MANUAL) {
             input_state = input_state || event_processor_a_pressed(&coord->events);
         }
-
-        mode_handler_process(mode, &coord->mode_ctx, input_state, &coord->output_state);
+    } else {
+        // In menu mode: CV only (buttons reserved for menu navigation)
+        input_state = cv_state;
     }
+
+    mode_handler_process(mode, &coord->mode_ctx, input_state, &coord->output_state);
 
     // Clear global pointer
     g_coord = NULL;

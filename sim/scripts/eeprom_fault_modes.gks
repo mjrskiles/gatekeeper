@@ -1,0 +1,90 @@
+# Test EEPROM fault injection modes (FDP-016 Phase 3)
+#
+# Tests that:
+# 1. System operates normally
+# 2. EEPROM write_fail mode doesn't crash system
+# 3. System recovers when fault is cleared
+#
+# Note: EEPROM is mostly used at boot (load settings) and menu exit (save settings).
+# This test verifies the system handles faults gracefully without crashing.
+
+# Wait for app init
+1000    log     Starting EEPROM fault mode test
+
+# ============================================================
+# Phase 1: Verify normal operation (Gate mode)
+# ============================================================
+0       log     Phase 1: Normal operation
+0       cv      0
+50      assert  output low
+
+0       cv      200
+50      assert  output high
+
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 2: Inject EEPROM write_fail during operation
+# ============================================================
+100     log     Phase 2: EEPROM write_fail mode
+0       fault   eeprom write_fail
+
+# System should continue to operate normally
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# Enter menu mode (A:hold then B:hold) - this will try to save on exit
+# Menu entry: hold A for 500ms, then hold B for 500ms
+0       press   a
+600     press   b
+600     release a
+50      release b
+
+# Still in menu mode, CV should still control output
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# Exit menu via A:hold (which triggers settings save - but write_fail is active)
+500     press   a
+600     release a
+
+# System should still work after failed save
+100     cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 3: Test read_ff mode
+# ============================================================
+100     log     Phase 3: EEPROM read_ff mode
+0       fault   eeprom read_ff
+
+# System should continue working (settings are in RAM)
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 4: Recovery
+# ============================================================
+100     log     Phase 4: Recovery
+0       fault   eeprom normal
+
+# Verify normal operation restored
+0       cv      255
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All tests passed!
+0       quit

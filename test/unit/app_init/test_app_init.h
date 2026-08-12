@@ -60,10 +60,10 @@ TEST(AppInitTests, TestGetDefaults) {
     app_init_get_defaults(&settings);
 
     TEST_ASSERT_EQUAL(MODE_GATE, settings.mode);
-    TEST_ASSERT_EQUAL(2, settings.trigger_pulse_idx);   // Default: 50ms
+    TEST_ASSERT_EQUAL(0, settings.trigger_pulse_idx);   // Default: 10ms
     TEST_ASSERT_EQUAL(0, settings.trigger_edge);        // Default: rising
     TEST_ASSERT_EQUAL(0, settings.divide_divisor_idx);  // Default: /2
-    TEST_ASSERT_EQUAL(2, settings.cycle_tempo_idx);     // Default: 100 BPM
+    TEST_ASSERT_EQUAL(0, settings.cycle_tempo_idx);     // Default: 60 BPM
     TEST_ASSERT_EQUAL(0, settings.toggle_edge);         // Default: rising
     TEST_ASSERT_EQUAL(0, settings.gate_a_mode);         // Default: off
     TEST_ASSERT_EQUAL(0, settings.reserved);

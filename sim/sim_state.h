@@ -79,7 +79,6 @@ typedef struct {
     int event_count;
 
     // Display hints (for terminal renderer)
-    bool realtime_mode;
     bool legend_visible;
 
     // Dirty tracking
@@ -125,11 +124,6 @@ void sim_state_add_event(SimState *state, SimEventType type, uint32_t time_ms, c
  * Toggle legend visibility.
  */
 void sim_state_toggle_legend(SimState *state);
-
-/**
- * Set realtime mode hint.
- */
-void sim_state_set_realtime(SimState *state, bool realtime);
 
 /**
  * Check if state has changed since last render.

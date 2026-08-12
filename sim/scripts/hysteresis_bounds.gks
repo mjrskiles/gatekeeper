@@ -1,0 +1,200 @@
+# Test Hysteresis boundary behavior (FDP-016 Phase 2)
+#
+# Comprehensive test of CV input hysteresis per ADR-004:
+# - High threshold: 128 (2.5V) - goes HIGH when CV > 128
+# - Low threshold:   77 (1.5V) - goes LOW when CV < 77
+# - Hysteresis band: 77-128 (1.0V) - maintains previous state
+#
+# Tests exact boundary values and noisy conditions.
+
+# Wait for app init
+1000    log     Starting Hysteresis boundary test
+
+# ============================================================
+# Phase 1: High threshold exact boundary (128)
+# ============================================================
+0       log     Phase 1: High threshold boundary
+0       cv      0
+50      assert  output low
+
+# Approach threshold from below
+0       cv      126
+100     assert  output low
+
+0       cv      127
+100     assert  output low
+
+# At threshold - should NOT trigger (need > 128)
+0       cv      128
+100     assert  output low
+
+# Just above threshold - should trigger
+0       cv      129
+100     assert  output high
+
+# ============================================================
+# Phase 2: Low threshold exact boundary (77)
+# ============================================================
+100     log     Phase 2: Low threshold boundary
+
+# Start HIGH
+0       cv      200
+50      assert  output high
+
+# Approach threshold from above
+0       cv      79
+100     assert  output high
+
+0       cv      78
+100     assert  output high
+
+# At threshold - should NOT trigger (need < 77)
+0       cv      77
+100     assert  output high
+
+# Just below threshold - should trigger
+0       cv      76
+100     assert  output low
+
+# ============================================================
+# Phase 3: Hysteresis band crossing
+# ============================================================
+100     log     Phase 3: Hysteresis band behavior
+
+# Start LOW
+0       cv      0
+50      assert  output low
+
+# Enter hysteresis band from below - stay LOW
+0       cv      100
+100     assert  output low
+
+# Exit band upward - go HIGH
+0       cv      130
+100     assert  output high
+
+# Re-enter hysteresis band from above - stay HIGH
+0       cv      100
+100     assert  output high
+
+# Exit band downward - go LOW
+0       cv      50
+100     assert  output low
+
+# ============================================================
+# Phase 4: No chatter at boundaries
+# ============================================================
+100     log     Phase 4: No chatter test
+
+# Start LOW
+0       cv      0
+50      assert  output low
+
+# Bounce around high threshold (should only go HIGH once)
+0       cv      127
+50      assert  output low
+0       cv      129
+50      assert  output high
+0       cv      127
+50      assert  output high
+0       cv      129
+50      assert  output high
+0       cv      127
+50      assert  output high
+
+# Return to 0
+0       cv      0
+50      assert  output low
+
+# Bounce around low threshold (should only go LOW once)
+0       cv      200
+50      assert  output high
+0       cv      78
+50      assert  output high
+0       cv      76
+50      assert  output low
+0       cv      78
+50      assert  output low
+0       cv      76
+50      assert  output low
+0       cv      78
+50      assert  output low
+
+# ============================================================
+# Phase 5: Noisy ADC test (with fault injection)
+# ============================================================
+100     log     Phase 5: Noisy ADC test
+
+# Start at known state
+0       cv      0
+0       fault   adc normal
+50      assert  output low
+
+# Enable noisy mode with small amplitude (5)
+# CV at 100 (mid-band) + noise of +/-5 should stay in band
+# This tests that hysteresis provides noise immunity
+0       fault   adc noisy
+0       cv      100
+
+# With CV at 100 and noise +/-5, we stay in range 95-105
+# This is well within hysteresis band (77-128)
+# Output should remain stable at its current state (LOW)
+100     assert  output low
+100     assert  output low
+100     assert  output low
+
+# Go above threshold with margin for noise
+0       cv      200
+100     assert  output high
+100     assert  output high
+100     assert  output high
+
+# Return to mid-band - should stay HIGH despite noise
+0       cv      100
+100     assert  output high
+100     assert  output high
+100     assert  output high
+
+# Go below threshold with margin for noise
+0       cv      30
+100     assert  output low
+100     assert  output low
+100     assert  output low
+
+# Return to normal mode
+0       fault   adc normal
+
+# ============================================================
+# Phase 6: Edge case values
+# ============================================================
+100     log     Phase 6: Edge cases
+
+# Start LOW
+0       cv      0
+50      assert  output low
+
+# Minimum value
+0       cv      0
+50      assert  output low
+
+# Maximum value
+0       cv      255
+50      assert  output high
+
+# Just above minimum
+0       cv      0
+50      assert  output low
+0       cv      1
+50      assert  output low
+
+# Just below maximum
+0       cv      255
+50      assert  output high
+0       cv      254
+50      assert  output high
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All Hysteresis boundary tests passed!
+0       quit

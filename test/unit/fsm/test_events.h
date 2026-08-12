@@ -69,6 +69,7 @@ TEST(EventProcessorTests, TestEventAHold) {
 }
 
 TEST(EventProcessorTests, TestEventAReleaseAfterHold) {
+    // Solo A:hold → release now generates EVT_MODE_NEXT (mode change gesture)
     // Press
     input.button_a = true;
     input.current_time = 100;
@@ -78,13 +79,13 @@ TEST(EventProcessorTests, TestEventAReleaseAfterHold) {
     input.current_time = 100 + EP_HOLD_THRESHOLD_MS;
     event_processor_update(&ep, &input);
 
-    // Release
+    // Release (solo, no B touched)
     input.button_a = false;
     input.current_time = 100 + EP_HOLD_THRESHOLD_MS + 100;
 
     Event evt = event_processor_update(&ep, &input);
 
-    TEST_ASSERT_EQUAL(EVT_A_RELEASE, evt);  // Release, not tap
+    TEST_ASSERT_EQUAL(EVT_MODE_NEXT, evt);  // Solo A:hold release = mode change
 }
 
 TEST(EventProcessorTests, TestEventBPress) {
@@ -164,12 +165,14 @@ TEST(EventProcessorTests, TestEventMenuToggle) {
     event_processor_update(&ep, &input);
 
     // A reaches hold threshold first (A was pressed 100ms earlier)
+    // Note: EVT_A_HOLD doesn't fire when B is pressed (only for solo holds)
+    // but the internal flag is set for compound gesture detection
     input.current_time = 100 + EP_HOLD_THRESHOLD_MS;
     Event evt_a = event_processor_update(&ep, &input);
-    TEST_ASSERT_EQUAL(EVT_A_HOLD, evt_a);
+    TEST_ASSERT_EQUAL(EVT_NONE, evt_a);  // No event, but internal hold flag is set
 
     // B reaches hold threshold - this triggers menu toggle
-    // (because A was pressed before B)
+    // (because A was pressed before B and A is holding)
     input.current_time = 200 + EP_HOLD_THRESHOLD_MS;
     Event evt = event_processor_update(&ep, &input);
 
@@ -177,28 +180,52 @@ TEST(EventProcessorTests, TestEventMenuToggle) {
 }
 
 TEST(EventProcessorTests, TestEventModeNext) {
-    // Mode Next: B pressed first, then A held for threshold
-    // Press B first
-    input.button_b = true;
+    // Mode Next: A:hold (solo) → release (no B pressed during hold)
+    // Press A
+    input.button_a = true;
     input.current_time = 100;
     event_processor_update(&ep, &input);
 
-    // Press A while B is still held (B was pressed first)
-    input.button_a = true;
-    input.current_time = 200;
-    event_processor_update(&ep, &input);
-
-    // B reaches hold threshold first (B was pressed 100ms earlier)
+    // Hold past threshold
     input.current_time = 100 + EP_HOLD_THRESHOLD_MS;
-    Event evt_b = event_processor_update(&ep, &input);
-    TEST_ASSERT_EQUAL(EVT_B_HOLD, evt_b);
+    Event evt_hold = event_processor_update(&ep, &input);
+    TEST_ASSERT_EQUAL(EVT_A_HOLD, evt_hold);
 
-    // A reaches hold threshold - this triggers mode next
-    // (because B was pressed before A)
-    input.current_time = 200 + EP_HOLD_THRESHOLD_MS;
+    // Release A (solo, no B was touched)
+    input.button_a = false;
+    input.current_time = 100 + EP_HOLD_THRESHOLD_MS + 100;
     Event evt = event_processor_update(&ep, &input);
 
     TEST_ASSERT_EQUAL(EVT_MODE_NEXT, evt);
+}
+
+TEST(EventProcessorTests, TestAReleaseAfterBTouch) {
+    // If B is pressed during A:hold, release should be EVT_A_RELEASE (not MODE_NEXT)
+    // Press A
+    input.button_a = true;
+    input.current_time = 100;
+    event_processor_update(&ep, &input);
+
+    // Hold past threshold
+    input.current_time = 100 + EP_HOLD_THRESHOLD_MS;
+    event_processor_update(&ep, &input);
+
+    // Press B briefly (this cancels the solo A:hold gesture)
+    input.button_b = true;
+    input.current_time = 100 + EP_HOLD_THRESHOLD_MS + 50;
+    event_processor_update(&ep, &input);
+
+    // Release B
+    input.button_b = false;
+    input.current_time = 100 + EP_HOLD_THRESHOLD_MS + 100;
+    event_processor_update(&ep, &input);
+
+    // Release A - should be EVT_A_RELEASE since B was touched
+    input.button_a = false;
+    input.current_time = 100 + EP_HOLD_THRESHOLD_MS + 150;
+    Event evt = event_processor_update(&ep, &input);
+
+    TEST_ASSERT_EQUAL(EVT_A_RELEASE, evt);
 }
 
 TEST(EventProcessorTests, TestNoDoubleFirePress) {
@@ -305,6 +332,7 @@ TEST_GROUP_RUNNER(EventProcessorTests) {
     RUN_TEST_CASE(EventProcessorTests, TestEventCVFall);
     RUN_TEST_CASE(EventProcessorTests, TestEventMenuToggle);
     RUN_TEST_CASE(EventProcessorTests, TestEventModeNext);
+    RUN_TEST_CASE(EventProcessorTests, TestAReleaseAfterBTouch);
     RUN_TEST_CASE(EventProcessorTests, TestNoDoubleFirePress);
     RUN_TEST_CASE(EventProcessorTests, TestNoDoubleFireHold);
     RUN_TEST_CASE(EventProcessorTests, TestAPressHasPriorityOverBPress);

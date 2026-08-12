@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sim_state_v1",
   "title": "Gatekeeper Simulator State",
-  "description": "State snapshot from the Gatekeeper x86 simulator",
+  "description": "State snapshot from the Gatekeeper native simulator",
   "type": "object",
   "required": ["version", "timestamp_ms", "state", "inputs", "outputs", "leds"],
   "properties": {

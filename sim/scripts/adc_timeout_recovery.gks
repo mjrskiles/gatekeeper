@@ -1,0 +1,97 @@
+# Test ADC timeout fault injection and recovery (FDP-016)
+#
+# Tests that:
+# 1. CV input works normally
+# 2. ADC timeout returns 128 (mid-scale, matching hardware)
+# 3. Hysteresis keeps output stable during timeout
+# 4. System recovers when fault is cleared
+#
+# Per ADR-004:
+# - High threshold: 128 (2.5V) - goes HIGH when above this
+# - Low threshold:   77 (1.5V) - goes LOW when below this
+# - Timeout returns 128, which is AT the high threshold
+
+# Wait for app init
+1000    log     Starting ADC timeout recovery test
+
+# ============================================================
+# Phase 1: Verify normal CV operation
+# ============================================================
+0       log     Phase 1: Normal CV operation
+0       fault   adc normal
+0       cv      0
+50      assert  output low
+
+# Apply CV high (above threshold 128)
+0       cv      200
+50      assert  output high
+
+# Drop back down
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 2: Inject ADC timeout while output is LOW
+# ============================================================
+100     log     Phase 2: Timeout while output LOW
+0       cv      0
+50      assert  output low
+
+# Inject timeout - ADC returns 128 (at threshold, but not above)
+# Since hysteresis requires > 128 to go HIGH, output stays LOW
+0       fault   adc timeout
+50      assert  output low
+
+# Clear fault and verify still works
+0       fault   adc normal
+0       cv      200
+50      assert  output high
+
+# ============================================================
+# Phase 3: Inject ADC timeout while output is HIGH
+# ============================================================
+100     log     Phase 3: Timeout while output HIGH
+0       cv      200
+50      assert  output high
+
+# Inject timeout - ADC returns 128
+# Hysteresis: need to go BELOW 77 to transition LOW
+# 128 is above 77, so output should stay HIGH
+0       fault   adc timeout
+50      assert  output high
+100     assert  output high
+
+# ============================================================
+# Phase 4: Recovery from timeout
+# ============================================================
+0       log     Phase 4: Recovery
+0       fault   adc normal
+0       cv      0
+50      assert  output low
+0       cv      255
+50      assert  output high
+
+# ============================================================
+# Phase 5: Quick timeout injection during transition
+# ============================================================
+100     log     Phase 5: Fault during transition
+0       cv      0
+50      assert  output low
+
+# Set CV high, then immediately inject timeout
+0       cv      200
+10      fault   adc timeout
+# The CV 200 should have been read before fault, output HIGH
+# Fault now in effect, returns 128, stays in hysteresis band
+50      assert  output high
+
+# Clear and verify
+0       fault   adc normal
+0       cv      50
+50      assert  output low
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All tests passed!
+0       quit

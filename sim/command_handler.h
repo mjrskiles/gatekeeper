@@ -21,6 +21,8 @@ typedef enum {
     CMD_CV_GATE,
     CMD_CV_TRIGGER,
     CMD_CV_WAVETABLE,
+    CMD_FAULT_ADC,      // FDP-016: ADC fault injection
+    CMD_FAULT_EEPROM,   // FDP-016 Phase 3: EEPROM fault injection
     CMD_RESET,
     CMD_QUIT
 } CommandType;

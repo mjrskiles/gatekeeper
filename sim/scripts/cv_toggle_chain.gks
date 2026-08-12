@@ -1,0 +1,136 @@
+# Test Toggle mode CV signal chain (FDP-016 Phase 2)
+#
+# Tests the complete signal path:
+#   CV rising edge → mode handler → output state flip
+#
+# Toggle mode: each rising edge flips the output state
+#
+# Per ADR-004 hysteresis:
+# - High threshold: 128 (2.5V) - goes HIGH when CV > 128
+# - Low threshold:   77 (1.5V) - goes LOW when CV < 77
+
+# Wait for app init
+1000    log     Starting Toggle mode CV signal chain test
+
+# ============================================================
+# Phase 1: Switch to Toggle mode (2 mode cycles from Gate)
+# ============================================================
+0       log     Phase 1: Switching to Toggle mode
+0       cv      0
+
+# First mode change: Gate -> Trigger
+0       press   a
+550     release a
+50      log     Switched to Trigger mode
+
+# Second mode change: Trigger -> Toggle
+0       press   a
+550     release a
+50      log     Now in Toggle mode
+
+# ============================================================
+# Phase 2: Initial state and first toggle
+# ============================================================
+100     log     Phase 2: Initial state and first toggle
+0       cv      0
+50      assert  output low
+
+# First rising edge - should flip to HIGH
+0       cv      200
+50      assert  output high
+
+# CV going low should not change output
+0       cv      0
+50      assert  output high
+
+# ============================================================
+# Phase 3: Toggle back to LOW
+# ============================================================
+100     log     Phase 3: Toggle back to LOW
+
+# Second rising edge - should flip to LOW
+0       cv      200
+50      assert  output low
+
+# CV going low should not change output
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 4: Multiple toggles in sequence
+# ============================================================
+100     log     Phase 4: Multiple toggles
+
+# Toggle 1: LOW -> HIGH
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output high
+
+# Toggle 2: HIGH -> LOW
+0       cv      200
+50      assert  output low
+0       cv      0
+50      assert  output low
+
+# Toggle 3: LOW -> HIGH
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output high
+
+# Toggle 4: HIGH -> LOW
+0       cv      200
+50      assert  output low
+
+# ============================================================
+# Phase 5: Toggle at threshold boundary
+# ============================================================
+100     log     Phase 5: Threshold boundary toggle
+0       cv      0
+50      assert  output low
+
+# Just below threshold - no toggle
+0       cv      127
+50      assert  output low
+
+# At threshold - no toggle (need to go ABOVE 128)
+0       cv      128
+50      assert  output low
+
+# Just above threshold - should toggle
+0       cv      129
+50      assert  output high
+
+# Return to 0
+0       cv      0
+50      assert  output high
+
+# ============================================================
+# Phase 6: State persistence
+# ============================================================
+100     log     Phase 6: State persistence
+
+# Toggle to LOW
+0       cv      200
+50      assert  output low
+0       cv      0
+100     assert  output low
+
+# Wait longer - should still be LOW
+500     assert  output low
+
+# Toggle to HIGH
+0       cv      200
+50      assert  output high
+0       cv      0
+100     assert  output high
+
+# Wait longer - should still be HIGH
+500     assert  output high
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All Toggle mode CV chain tests passed!
+0       quit

@@ -1,0 +1,146 @@
+# Test Gate mode CV signal chain (FDP-016 Phase 2)
+#
+# Tests the complete signal path:
+#   CV input (ADC) → hysteresis → mode handler → output
+#
+# Per ADR-004:
+# - High threshold: 128 (2.5V) - goes HIGH when CV > 128
+# - Low threshold:   77 (1.5V) - goes LOW when CV < 77
+# - Hysteresis band: 77-128 - output maintains previous state
+#
+# Gate mode: output directly tracks the hysteresis-processed CV input
+
+# Wait for app init
+1000    log     Starting Gate mode CV signal chain test
+
+# ============================================================
+# Phase 1: Basic CV operation - output tracks input
+# ============================================================
+0       log     Phase 1: Basic CV operation
+0       cv      0
+50      assert  output low
+
+# Apply high CV
+0       cv      255
+50      assert  output high
+
+# Drop CV to low
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 2: High threshold boundary testing (128)
+# ============================================================
+100     log     Phase 2: High threshold boundary (128)
+
+# Just below threshold - should stay LOW
+0       cv      127
+100     assert  output low
+
+# At threshold - should stay LOW (need to be ABOVE 128)
+0       cv      128
+100     assert  output low
+
+# Just above threshold - should go HIGH
+0       cv      129
+100     assert  output high
+
+# ============================================================
+# Phase 3: Low threshold boundary testing (77)
+# ============================================================
+100     log     Phase 3: Low threshold boundary (77)
+
+# Start with output HIGH
+0       cv      200
+50      assert  output high
+
+# Drop into hysteresis band - should stay HIGH
+0       cv      100
+100     assert  output high
+
+# Just above low threshold - should stay HIGH
+0       cv      78
+100     assert  output high
+
+# At low threshold - should stay HIGH (need to be BELOW 77)
+0       cv      77
+100     assert  output high
+
+# Just below low threshold - should go LOW
+0       cv      76
+100     assert  output low
+
+# ============================================================
+# Phase 4: Hysteresis band behavior
+# ============================================================
+100     log     Phase 4: Hysteresis band behavior
+
+# Start LOW
+0       cv      0
+50      assert  output low
+
+# Enter hysteresis band from below - should stay LOW
+0       cv      100
+100     assert  output low
+
+# Go above high threshold
+0       cv      130
+100     assert  output high
+
+# Return to hysteresis band - should stay HIGH
+0       cv      100
+100     assert  output high
+
+# Go below low threshold
+0       cv      50
+100     assert  output low
+
+# Return to hysteresis band - should stay LOW
+0       cv      100
+100     assert  output low
+
+# ============================================================
+# Phase 5: Rapid transitions
+# ============================================================
+100     log     Phase 5: Rapid transitions
+
+# Quick high-low-high sequence
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+0       cv      200
+50      assert  output high
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 6: Mid-scale values
+# ============================================================
+100     log     Phase 6: Mid-scale values
+
+# Start at 0
+0       cv      0
+50      assert  output low
+
+# Go to 2.5V equivalent (128) - not above, so stays LOW
+0       cv      128
+100     assert  output low
+
+# Go to 3V equivalent (153)
+0       cv      153
+100     assert  output high
+
+# Go to 2V equivalent (102) - in hysteresis band, stays HIGH
+0       cv      102
+100     assert  output high
+
+# Go to 1V equivalent (51) - below low threshold
+0       cv      51
+100     assert  output low
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All Gate mode CV chain tests passed!
+0       quit

@@ -98,11 +98,20 @@ TEST(LEDFeedbackTests, TestActivityOff) {
     TEST_ASSERT_TRUE(mock_neopixel_check_color(LED_ACTIVITY, 0, 0, 0));
 }
 
-TEST(LEDFeedbackTests, TestMenuEnterBlinks) {
+TEST(LEDFeedbackTests, TestMenuEnterFirstPageBlinks) {
+    // First page of group should blink (clearly different from solid perform mode)
     led_feedback_enter_menu(&ctrl, PAGE_GATE_CV);
 
     TEST_ASSERT_TRUE(ctrl.in_menu);
     TEST_ASSERT_EQUAL(ANIM_BLINK, ctrl.mode_anim.type);
+}
+
+TEST(LEDFeedbackTests, TestMenuEnterSecondPageGlows) {
+    // Second page of group should glow to differentiate from first
+    led_feedback_enter_menu(&ctrl, PAGE_TRIGGER_PULSE_LEN);
+
+    TEST_ASSERT_TRUE(ctrl.in_menu);
+    TEST_ASSERT_EQUAL(ANIM_GLOW, ctrl.mode_anim.type);
 }
 
 TEST(LEDFeedbackTests, TestMenuExitRestoresMode) {
@@ -158,7 +167,8 @@ TEST_GROUP_RUNNER(LEDFeedbackTests) {
     RUN_TEST_CASE(LEDFeedbackTests, TestSetModeUpdatesColor);
     RUN_TEST_CASE(LEDFeedbackTests, TestActivityLED);
     RUN_TEST_CASE(LEDFeedbackTests, TestActivityOff);
-    RUN_TEST_CASE(LEDFeedbackTests, TestMenuEnterBlinks);
+    RUN_TEST_CASE(LEDFeedbackTests, TestMenuEnterFirstPageBlinks);
+    RUN_TEST_CASE(LEDFeedbackTests, TestMenuEnterSecondPageGlows);
     RUN_TEST_CASE(LEDFeedbackTests, TestMenuExitRestoresMode);
     RUN_TEST_CASE(LEDFeedbackTests, TestPageColors);
     RUN_TEST_CASE(LEDFeedbackTests, TestSetPageUpdatesColor);

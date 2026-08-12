@@ -51,7 +51,6 @@ void sim_state_init(SimState *state) {
     state->mode = MODE_GATE;
     state->page = PAGE_GATE_CV;
     state->in_menu = false;
-    state->realtime_mode = true;
     state->legend_visible = false;
     state->dirty = true;
 }
@@ -135,14 +134,6 @@ void sim_state_toggle_legend(SimState *state) {
     if (!state) return;
     state->legend_visible = !state->legend_visible;
     state->dirty = true;
-}
-
-void sim_state_set_realtime(SimState *state, bool realtime) {
-    if (!state) return;
-    if (state->realtime_mode != realtime) {
-        state->realtime_mode = realtime;
-        state->dirty = true;
-    }
 }
 
 bool sim_state_is_dirty(const SimState *state) {

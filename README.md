@@ -2,9 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A digital gate/trigger processor for Eurorack modular synthesizers. Gatekeeper has a two-state (0 or 5V) output driven by a push button or CV input. The input response is configurable via menu actions. 
+A digital gate/trigger processor for Eurorack modular synthesizers. Gatekeeper has a two-state (0 or 5V) output driven by push button and CV input. The input response is configurable via menu settings. 
 
-This project is designed as a reference for those learning synth/modular DIY and/or embedded development on AVR microcontrollers.
+This project is designed as a reference for hackers of all types. We assume hardware and coding knowledge, but those with a strong desire to learn and build will find this an approachable beginner hardware project.
 
 ## Features
 
@@ -12,8 +12,8 @@ This project is designed as a reference for those learning synth/modular DIY and
   - **Gate:** Output stays high while input is held
   - **Trigger:** Rising edge triggers a fixed-duration pulse (1-50ms)
   - **Toggle:** Each press flips the output state
-  - **Divide:** Clock divider - outputs every N inputs (2-24)
-  - **Cycle:** Internal clock generator (default 80 BPM)
+  - **Divide:** Clock divider - outputs every N rising edges (2-24)
+  - **Cycle:** Internal clock generator
 
 - **Persistent Settings:**
   Mode selection is saved to EEPROM and restored on power-up. Factory reset is available by holding both buttons for 3 seconds during startup.
@@ -22,28 +22,29 @@ This project is designed as a reference for those learning synth/modular DIY and
   Robust button state detection with rising and falling edge detection.
 
 - **Configuration Gestures:**
-  - **Menu Toggle:** Hold Button A, then hold Button B (500ms each) to enter/exit menu
-  - **Mode Change:** Hold Button B, then hold Button A (500ms each) to cycle modes
+  - **Menu Enter:** Hold Button A, then hold Button B (500ms each) to enter menu
+  - **Menu Exit:** Hold Button A (500ms) to exit menu immediately
+  - **Mode Change:** Hold Button A (500ms), then release to cycle modes
   - **Menu Navigation:** Tap Button A to change page, tap Button B to cycle values
 
 - **Hardware Abstraction Layer (HAL):**
   Clean interface for hardware access, enabling comprehensive unit testing on the host machine.
 
 - **Unit Testing:**
-  144 tests using the Unity framework verify functionality without hardware.
+  152 tests using the Unity framework verify functionality without hardware.
 
-- **x86 Simulator:**
-  Interactive terminal UI or headless JSON output for testing without hardware.
+- **Native Simulator:**
+  Interactive terminal UI or headless JSON output for development without hardware.
 
 ## Hardware
 
-**Target:** ATtiny85 @ 8 MHz (internal RC oscillator, CKDIV8 fuse disabled)
+**Target:** ATtiny85 @ 8 MHz (internal RC oscillator)
 
 | Resource | Size | Usage |
 |----------|------|-------|
-| Flash | 8 KB | ~94% used |
-| SRAM | 512 B | ~39% used |
-| EEPROM | 512 B | Settings persistence |
+| Flash | 8 KB | ~87% used |
+| SRAM | 512 B | ~38% used |
+| EEPROM | 512 B | 17 bytes used (~3%) |
 
 **Pin Assignment:**
 
@@ -56,11 +57,24 @@ This project is designed as a reference for those learning synth/modular DIY and
 | PB4 | Button B (primary/gate control) |
 | PB5 | RESET |
 
-Output LED is driven directly from the buffered output circuit, not GPIO.
+LED X and Y are Neopixels connected to PB0.
 
 ## Code Architecture
 
-The firmware is organized into modules:
+The firmware is organized into reusable library code (`lib/`) and application-specific code (`src/`), with headers alongside sources:
+
+```
+lib/                    src/
+├── events/             ├── config/
+├── fsm/                ├── core/
+├── hardware/           ├── hardware/
+├── input/              ├── modes/
+├── output/             ├── output/
+└── utility/            ├── app_init.c/.h
+                        └── main.c
+```
+
+Key modules:
 
 | Module | Purpose |
 |--------|---------|
@@ -112,46 +126,12 @@ ctest --preset tests
 
 # Build and run simulator
 cmake --preset sim && cmake --build --preset sim
-./build_sim/sim/gatekeeper-sim
+./build/sim/sim/gatekeeper-sim
 ```
 
-### x86 Simulator
+### Native Simulator
 
-The simulator runs the application logic on your host machine with multiple output modes:
-
-```bash
-./sim/gatekeeper-sim              # Interactive terminal UI
-./sim/gatekeeper-sim --json       # JSON output (NDJSON format)
-./sim/gatekeeper-sim --batch      # Plain text (for scripts/CI)
-./sim/gatekeeper-sim --fast       # Fast-forward mode
-./sim/gatekeeper-sim --script test.gks  # Run test script
-```
-
-**Terminal UI:**
-```
-=== Gatekeeper Simulator ===              Time: 1234 ms
-
-  LEDs: [███] [███]  (Mode / Activity)
-
-  State: PERFORM     Mode: GATE     Page: --
-
-  Output: [ HIGH ]
-
-  Button A: [HELD]    Button B: [ -- ]
-
-  [A] Button A  [B] Button B  [Q] Quit
-  [R] Reset     [F] Fast/Real [L] Legend
-```
-
-**JSON Output:**
-
-The `--json` flag outputs state as [NDJSON](https://github.com/ndjson/ndjson-spec) (Newline Delimited JSON) - one JSON object per line, no external dependencies. Schema defined in `sim/schema/sim_state_v1.json`.
-
-```json
-{"version":1,"timestamp_ms":1234,"state":{"top":"PERFORM","mode":"GATE","page":null},"inputs":{"button_a":true,"button_b":false,"cv_in":false},"outputs":{"signal":true},"leds":[{"index":0,"name":"mode","r":0,"g":255,"b":0},{"index":1,"name":"activity","r":255,"g":255,"b":255}],"events":[]}
-```
-
-This enables piping to `jq`, logging, or building custom frontends.
+The simulator is under construction.
 
 ### Flashing
 

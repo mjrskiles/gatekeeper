@@ -8,24 +8,27 @@ file(GLOB_RECURSE TEST_SOURCES
 # If you want to test a new source file, you need to add it to the test executable
 add_executable(${PROJECT_NAME}_unit_tests
     ${TEST_SOURCES}
-    ${CMAKE_SOURCE_DIR}/src/input/button.c
-    ${CMAKE_SOURCE_DIR}/src/input/cv_input.c
-    ${CMAKE_SOURCE_DIR}/src/output/cv_output.c
-    ${CMAKE_SOURCE_DIR}/src/output/led_animation.c
+    # Library code (lib/)
+    ${CMAKE_SOURCE_DIR}/lib/input/button.c
+    ${CMAKE_SOURCE_DIR}/lib/input/cv_input.c
+    ${CMAKE_SOURCE_DIR}/lib/output/cv_output.c
+    ${CMAKE_SOURCE_DIR}/lib/output/led_animation.c
+    ${CMAKE_SOURCE_DIR}/lib/utility/delay.c
+    ${CMAKE_SOURCE_DIR}/lib/fsm/fsm.c
+    ${CMAKE_SOURCE_DIR}/lib/events/events.c
+    # Application code (src/)
     ${CMAKE_SOURCE_DIR}/src/output/led_feedback.c
-    ${CMAKE_SOURCE_DIR}/src/utility/delay.c
     ${CMAKE_SOURCE_DIR}/src/app_init.c
-    ${CMAKE_SOURCE_DIR}/src/fsm/fsm.c
-    ${CMAKE_SOURCE_DIR}/src/events/events.c
     ${CMAKE_SOURCE_DIR}/src/modes/mode_handlers.c
     ${CMAKE_SOURCE_DIR}/src/core/coordinator.c
 )
 
 # Add test include directories
-target_include_directories(${PROJECT_NAME}_unit_tests PRIVATE 
+target_include_directories(${PROJECT_NAME}_unit_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/external/unity/src
     ${CMAKE_SOURCE_DIR}/external/unity/extras/fixture/src
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/lib
     ${CMAKE_SOURCE_DIR}/test/unit
 )
 

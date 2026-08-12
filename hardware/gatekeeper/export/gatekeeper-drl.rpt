@@ -1,0 +1,29 @@
+Drill report for gatekeeper.kicad_pcb
+Created on 2026-01-01T17:48:28-0600
+
+Copper Layer Stackup:
+    =============================================================
+    L1 :  F.Cu                      front
+    L2 :  B.Cu                      back
+
+
+Drill file 'gatekeeper-PTH.drl' contains
+    plated through holes:
+    =============================================================
+    T1  0.300mm  0.0118"  (34 holes)
+    T2  0.406mm  0.0160"  (5 holes)
+    T3  0.508mm  0.0200"  (9 holes)
+    T4  0.900mm  0.0354"  (8 holes)
+    T5  1.000mm  0.0394"  (16 holes)
+    T6  1.100mm  0.0433"  (8 holes)
+    T7  1.500mm  0.0591"  (6 holes)
+
+    Total plated holes count 86
+
+
+Drill file 'gatekeeper-NPTH.drl' contains
+    unplated through holes:
+    =============================================================
+    T1  3.000mm  0.1181"  (2 holes)
+
+    Total unplated holes count 2

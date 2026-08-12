@@ -1,0 +1,150 @@
+# Test Menu mode CV passthrough (FDP-016 Phase 2)
+#
+# Tests that CV input continues to control output while in menu mode,
+# and that button B does not affect output (used for menu navigation).
+#
+# Menu gestures:
+# - Enter menu: Hold A 500ms, then hold B 500ms (while A still held)
+# - Exit menu:  Hold A 500ms (solo, not while B held)
+#
+# This is a critical test for the AP-005 fix that ensured signal
+# processing continues in menu mode.
+
+# Wait for app init
+1000    log     Starting Menu mode CV passthrough test
+
+# ============================================================
+# Phase 1: Verify normal operation before menu entry
+# ============================================================
+0       log     Phase 1: Normal Gate mode operation
+0       cv      0
+50      assert  output low
+
+0       cv      200
+50      assert  output high
+
+0       cv      0
+50      assert  output low
+
+# ============================================================
+# Phase 2: Enter menu mode
+# ============================================================
+100     log     Phase 2: Entering menu mode
+
+# Hold A for 500ms
+0       press   a
+550     log     A held for 500ms
+
+# Now press B while still holding A
+0       press   b
+# Wait for B hold threshold (500ms)
+550     log     Menu should be entered now
+
+# Release both buttons
+0       release a
+0       release b
+50      log     Menu mode active
+
+# ============================================================
+# Phase 3: CV continues to control output in menu
+# ============================================================
+100     log     Phase 3: CV passthrough in menu
+
+# Start low
+0       cv      0
+50      assert  output low
+
+# CV high - output should follow
+0       cv      200
+50      assert  output high
+
+# CV low - output should follow
+0       cv      0
+50      assert  output low
+
+# CV back high
+0       cv      200
+50      assert  output high
+
+# ============================================================
+# Phase 4: Button B does NOT affect output in menu mode
+# ============================================================
+100     log     Phase 4: Button B for menu only
+
+# Start with CV low (output LOW)
+0       cv      0
+50      assert  output low
+
+# Press B - should NOT change output (used for menu nav)
+0       press   b
+100     assert  output low
+0       release b
+50      assert  output low
+
+# Now with CV high (output HIGH)
+0       cv      200
+50      assert  output high
+
+# Press B - should NOT change output
+0       press   b
+100     assert  output high
+0       release b
+50      assert  output high
+
+# ============================================================
+# Phase 5: CV still works while B is pressed
+# ============================================================
+100     log     Phase 5: CV while B pressed
+
+0       cv      0
+0       press   b
+50      assert  output low
+
+# CV high while B held
+0       cv      200
+50      assert  output high
+
+# CV low while B held
+0       cv      0
+50      assert  output low
+
+0       release b
+50      assert  output low
+
+# ============================================================
+# Phase 6: Exit menu mode
+# ============================================================
+100     log     Phase 6: Exiting menu mode
+
+# Hold A for 500ms to exit
+0       press   a
+550     release a
+50      log     Back to perform mode
+
+# ============================================================
+# Phase 7: Normal operation resumes
+# ============================================================
+100     log     Phase 7: Normal operation resumed
+
+# CV still works
+0       cv      0
+50      assert  output low
+
+0       cv      200
+50      assert  output high
+
+# Button B should now control output again (in Gate mode)
+0       cv      0
+50      assert  output low
+
+0       press   b
+50      assert  output high
+
+0       release b
+50      assert  output low
+
+# ============================================================
+# Done
+# ============================================================
+100     log     All Menu mode CV passthrough tests passed!
+0       quit

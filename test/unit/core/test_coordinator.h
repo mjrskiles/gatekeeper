@@ -87,17 +87,30 @@ static void do_menu_toggle_gesture(void) {
 }
 
 /**
- * Perform mode next gesture: B hold + A hold (B pressed first)
- * Returns with both buttons still held
+ * Perform mode next gesture: A hold (solo) → release
+ * Returns with A released
  */
 static void do_mode_next_gesture(void) {
-    // Press B first
-    press_button_b();
-    run_for_ms(100);
-
-    // Press A while B is held
+    // Press A (solo, no B)
     press_button_a();
     run_for_ms(EP_HOLD_THRESHOLD_MS + 50);  // Wait for A to reach hold threshold
+
+    // Release A to trigger mode change
+    release_button_a();
+    run_for_ms(50);
+}
+
+/**
+ * Perform menu exit gesture: A hold (solo) - exits on hold threshold, no release needed
+ */
+static void do_menu_exit_gesture(void) {
+    // Press A (solo, no B)
+    press_button_a();
+    run_for_ms(EP_HOLD_THRESHOLD_MS + 50);  // Wait for A to reach hold threshold - menu exits here
+
+    // Release A
+    release_button_a();
+    run_for_ms(50);
 }
 
 // =============================================================================
@@ -112,7 +125,7 @@ TEST(CoordinatorTests, TestMenuToggleEntersMenu) {
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
 }
 
-TEST(CoordinatorTests, TestMenuToggleExitsMenu) {
+TEST(CoordinatorTests, TestMenuExitsOnAHold) {
     // Enter menu first
     do_menu_toggle_gesture();
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
@@ -125,8 +138,8 @@ TEST(CoordinatorTests, TestMenuToggleExitsMenu) {
     // Still in menu after release
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
 
-    // Do gesture again to exit
-    do_menu_toggle_gesture();
+    // Exit menu with A:hold (solo) - exits immediately on hold threshold
+    do_menu_exit_gesture();
 
     TEST_ASSERT_EQUAL(TOP_PERFORM, coordinator_get_top_state(&coord));
 }
@@ -151,7 +164,7 @@ TEST(CoordinatorTests, TestMenuDoesNotExitOnButtonRelease) {
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
 }
 
-TEST(CoordinatorTests, TestMenuDoesNotExitOnSingleButtonHold) {
+TEST(CoordinatorTests, TestMenuExitsOnAHoldButNotBHold) {
     // Enter menu
     do_menu_toggle_gesture();
     release_button_a();
@@ -159,22 +172,17 @@ TEST(CoordinatorTests, TestMenuDoesNotExitOnSingleButtonHold) {
     run_for_ms(100);
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
 
-    // Hold just A (not the toggle gesture)
-    press_button_a();
-    run_for_ms(EP_HOLD_THRESHOLD_MS + 100);
-
-    // Should still be in menu
-    TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
-
-    release_button_a();
-    run_for_ms(100);
-
-    // Hold just B
+    // Hold just B - should NOT exit menu (B:hold has no effect)
     press_button_b();
     run_for_ms(EP_HOLD_THRESHOLD_MS + 100);
-
-    // Should still be in menu
     TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
+    release_button_b();
+    run_for_ms(100);
+
+    // Hold just A - SHOULD exit menu (A:hold solo = exit)
+    press_button_a();
+    run_for_ms(EP_HOLD_THRESHOLD_MS + 100);
+    TEST_ASSERT_EQUAL(TOP_PERFORM, coordinator_get_top_state(&coord));
 }
 
 // =============================================================================
@@ -256,25 +264,19 @@ TEST(CoordinatorTests, TestMenuTimeoutResetsOnButtonHold) {
 TEST(CoordinatorTests, TestModeNextChangesMode) {
     TEST_ASSERT_EQUAL(MODE_GATE, coordinator_get_mode(&coord));
 
+    // A:hold (solo) → release changes mode
     do_mode_next_gesture();
 
     TEST_ASSERT_EQUAL(MODE_TRIGGER, coordinator_get_mode(&coord));
 
-    // Release and do again
-    release_button_a();
-    release_button_b();
-    run_for_ms(100);
-
+    // Do again
     do_mode_next_gesture();
     TEST_ASSERT_EQUAL(MODE_TOGGLE, coordinator_get_mode(&coord));
 }
 
 TEST(CoordinatorTests, TestModeNextWrapsAround) {
-    // Cycle through all modes
+    // Cycle through all modes (do_mode_next_gesture releases A at the end)
     for (int i = 0; i < MODE_COUNT; i++) {
-        release_button_a();
-        release_button_b();
-        run_for_ms(100);
         do_mode_next_gesture();
     }
 
@@ -291,11 +293,8 @@ TEST(CoordinatorTests, TestModeChangeDoesNotAffectOutput) {
     release_button_b();
     run_for_ms(50);
 
-    // Change mode
+    // Change mode (A:hold solo → release)
     do_mode_next_gesture();
-    release_button_a();
-    release_button_b();
-    run_for_ms(100);
 
     // Output should be determined by new mode's initial state
     // (Trigger mode starts with output low)
@@ -320,7 +319,7 @@ TEST(CoordinatorTests, TestMenuGestureDoesNotTriggerModeChange) {
 }
 
 TEST(CoordinatorTests, TestModeGestureDoesNotEnterMenu) {
-    // Mode gesture: B first, then A
+    // Mode gesture: A:hold (solo) → release
     do_mode_next_gesture();
 
     // Should still be in perform mode
@@ -328,6 +327,25 @@ TEST(CoordinatorTests, TestModeGestureDoesNotEnterMenu) {
 
     // But mode should have changed
     TEST_ASSERT_EQUAL(MODE_TRIGGER, coordinator_get_mode(&coord));
+}
+
+TEST(CoordinatorTests, TestMenuExitDoesNotChangeMode) {
+    // Enter menu
+    do_menu_toggle_gesture();
+    release_button_a();
+    release_button_b();
+    run_for_ms(100);
+    TEST_ASSERT_EQUAL(TOP_MENU, coordinator_get_top_state(&coord));
+    TEST_ASSERT_EQUAL(MODE_GATE, coordinator_get_mode(&coord));
+
+    // Exit menu with A:hold
+    do_menu_exit_gesture();
+
+    // Should be back in perform mode
+    TEST_ASSERT_EQUAL(TOP_PERFORM, coordinator_get_top_state(&coord));
+
+    // Mode should NOT have changed (still GATE)
+    TEST_ASSERT_EQUAL(MODE_GATE, coordinator_get_mode(&coord));
 }
 
 // =============================================================================
@@ -350,8 +368,8 @@ TEST(CoordinatorTests, TestMenuValueCyclesTriggerPulse) {
     run_for_ms(50);
     TEST_ASSERT_EQUAL(PAGE_TRIGGER_PULSE_LEN, coordinator_get_page(&coord));
 
-    // Initial value is default (index 2 = 50ms)
-    TEST_ASSERT_EQUAL(2, settings.trigger_pulse_idx);
+    // Initial value is default (index 0 = 10ms)
+    TEST_ASSERT_EQUAL(0, settings.trigger_pulse_idx);
 
     // B tap cycles value
     press_button_b();
@@ -359,8 +377,8 @@ TEST(CoordinatorTests, TestMenuValueCyclesTriggerPulse) {
     release_button_b();
     run_for_ms(50);
 
-    // Value should have cycled (2 -> 3)
-    TEST_ASSERT_EQUAL(3, settings.trigger_pulse_idx);
+    // Value should have cycled (0 -> 1)
+    TEST_ASSERT_EQUAL(1, settings.trigger_pulse_idx);
 }
 
 TEST(CoordinatorTests, TestMenuValueWrapsAround) {
@@ -450,9 +468,9 @@ TEST(CoordinatorTests, TestGateAButtonOnlyWorksInGateMode) {
 TEST_GROUP_RUNNER(CoordinatorTests) {
     // Menu toggle tests
     RUN_TEST_CASE(CoordinatorTests, TestMenuToggleEntersMenu);
-    RUN_TEST_CASE(CoordinatorTests, TestMenuToggleExitsMenu);
+    RUN_TEST_CASE(CoordinatorTests, TestMenuExitsOnAHold);
     RUN_TEST_CASE(CoordinatorTests, TestMenuDoesNotExitOnButtonRelease);
-    RUN_TEST_CASE(CoordinatorTests, TestMenuDoesNotExitOnSingleButtonHold);
+    RUN_TEST_CASE(CoordinatorTests, TestMenuExitsOnAHoldButNotBHold);
 
     // Menu timeout tests
     RUN_TEST_CASE(CoordinatorTests, TestMenuTimeoutExitsMenu);
@@ -467,6 +485,7 @@ TEST_GROUP_RUNNER(CoordinatorTests) {
     // Non-interference tests
     RUN_TEST_CASE(CoordinatorTests, TestMenuGestureDoesNotTriggerModeChange);
     RUN_TEST_CASE(CoordinatorTests, TestModeGestureDoesNotEnterMenu);
+    RUN_TEST_CASE(CoordinatorTests, TestMenuExitDoesNotChangeMode);
 
     // Menu value cycling tests
     RUN_TEST_CASE(CoordinatorTests, TestMenuValueCyclesTriggerPulse);

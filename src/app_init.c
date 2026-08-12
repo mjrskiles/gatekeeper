@@ -1,9 +1,26 @@
 #include "app_init.h"
 #include "config/mode_config.h"
 #include "utility/delay.h"
+#include "utility/progmem.h"
+#include "core/states.h"
 
 // Size of AppSettings struct for iteration
 #define APP_SETTINGS_SIZE sizeof(AppSettings)
+
+/**
+ * Validation limits for AppSettings fields (in struct order).
+ * Value of 0 means no validation (any value valid).
+ */
+static const uint8_t SETTINGS_LIMITS[] PROGMEM_ATTR = {
+    MODE_COUNT,             // mode
+    TRIGGER_PULSE_COUNT,    // trigger_pulse_idx
+    TRIGGER_EDGE_COUNT,     // trigger_edge
+    DIVIDE_DIVISOR_COUNT,   // divide_divisor_idx
+    CYCLE_TEMPO_COUNT,      // cycle_tempo_idx
+    TOGGLE_EDGE_COUNT,      // toggle_edge
+    GATE_A_MODE_COUNT,      // gate_a_mode
+    0,                      // reserved (no validation)
+};
 
 /**
  * Calculate XOR checksum over settings struct.
@@ -60,10 +77,10 @@ void app_init_get_defaults(AppSettings *settings) {
     if (!settings) return;
 
     settings->mode = MODE_GATE;
-    settings->trigger_pulse_idx = 2;    // Default: 50ms pulse
+    settings->trigger_pulse_idx = 0;    // Default: 10ms pulse
     settings->trigger_edge = 0;         // Default: rising edge
     settings->divide_divisor_idx = 0;   // Default: /2
-    settings->cycle_tempo_idx = 2;      // Default: 100 BPM (600ms period)
+    settings->cycle_tempo_idx = 0;      // Default: 60 BPM (1Hz)
     settings->toggle_edge = 0;          // Default: rising edge
     settings->gate_a_mode = 0;          // Default: A button disabled
     settings->reserved = 0;
@@ -176,27 +193,13 @@ static bool load_settings(AppSettings *settings) {
         return false;
     }
 
-    // Level 4: Range validation using defines from mode_config.h
-    if (settings->mode >= MODE_COUNT) {
-        return false;
-    }
-    if (settings->trigger_pulse_idx >= TRIGGER_PULSE_COUNT) {
-        return false;
-    }
-    if (settings->trigger_edge >= TRIGGER_EDGE_COUNT) {
-        return false;
-    }
-    if (settings->divide_divisor_idx >= DIVIDE_DIVISOR_COUNT) {
-        return false;
-    }
-    if (settings->cycle_tempo_idx >= CYCLE_TEMPO_COUNT) {
-        return false;
-    }
-    if (settings->toggle_edge >= TOGGLE_EDGE_COUNT) {
-        return false;
-    }
-    if (settings->gate_a_mode >= GATE_A_MODE_COUNT) {
-        return false;
+    // Level 4: Range validation using PROGMEM limits table
+    const uint8_t *fields = (const uint8_t *)settings;
+    for (uint8_t i = 0; i < SETTINGS_FIELD_COUNT; i++) {
+        uint8_t limit = PROGMEM_READ_BYTE(&SETTINGS_LIMITS[i]);
+        if (limit > 0 && fields[i] >= limit) {
+            return false;
+        }
     }
 
     return true;

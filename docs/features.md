@@ -2,7 +2,7 @@
 
 > Current capabilities and implementation status
 
-Last updated: 2025-12-15
+Last updated: 2025-12-21
 
 ---
 
@@ -11,8 +11,8 @@ Last updated: 2025-12-15
 | Platform | MCU | Status | Notes |
 |----------|-----|--------|-------|
 | Production | ATtiny85 @ 8MHz | **Supported** | 8KB flash, 512B RAM |
-| Unit Tests | x86/ARM host | **Supported** | Mock HAL, 144 tests |
-| Simulator | x86/ARM host | **Supported** | Interactive + headless |
+| Unit Tests | Native (host) | **Supported** | Mock HAL, 150 tests |
+| Simulator | Native (host) | **Supported** | Interactive + headless, cJSON |
 
 ---
 
@@ -253,7 +253,7 @@ Last updated: 2025-12-15
 | App initialization | 15 | Complete |
 | LED feedback | 12 | Complete |
 | CV input | 8 | Complete |
-| **Total** | **144** | **Complete** |
+| **Total** | **150** | **Complete** |
 
 ---
 
@@ -261,9 +261,9 @@ Last updated: 2025-12-15
 
 | Resource | Used | Available | Percentage |
 |----------|------|-----------|------------|
-| Flash | ~5.5 KB | 8 KB | ~68% |
-| SRAM | ~124 B | 512 B | ~24% |
-| EEPROM | ~17 B | 512 B | ~3% |
+| Flash | ~6.9 KB | 8 KB | ~84% |
+| SRAM | ~200 B | 512 B | ~39% |
+| EEPROM | 17 B | 512 B | ~3% |
 
 ---
 

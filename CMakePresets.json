@@ -10,7 +10,7 @@
       "name": "base",
       "hidden": true,
       "generator": "Unix Makefiles",
-      "binaryDir": "${sourceDir}/build_${presetName}",
+      "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -19,12 +19,11 @@
       "name": "firmware",
       "displayName": "Firmware (AVR)",
       "description": "ATtiny85 firmware build",
-      "inherits": "base",
-      "binaryDir": "${sourceDir}/build"
+      "inherits": "base"
     },
     {
       "name": "tests",
-      "displayName": "Unit Tests (x86)",
+      "displayName": "Unit Tests (Native)",
       "description": "Host build with Unity test framework",
       "inherits": "base",
       "cacheVariables": {
@@ -33,8 +32,8 @@
     },
     {
       "name": "sim",
-      "displayName": "Simulator (x86)",
-      "description": "Interactive x86 simulator with terminal UI",
+      "displayName": "Simulator (Native)",
+      "description": "Interactive native simulator with terminal UI",
       "inherits": "base",
       "cacheVariables": {
         "BUILD_SIM": "ON"
